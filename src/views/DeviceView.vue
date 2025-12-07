@@ -195,6 +195,35 @@ const tabs = [
 
 const showDeviceDrawer = ref(false);
 const isAddingDevice = ref(false);
+const deviceList = ref([]);
+
+// 获取设备列表
+const updateDeviceList = async () => {
+  if (!client.isSupportedWebUsb) {
+    return;
+  }
+  try {
+    deviceList.value = await client.getUsbDeviceList();
+  } catch (error) {
+    console.error('Failed to get device list:', error);
+  }
+};
+
+// 处理按钮点击：多设备时显示选择菜单（已连接时），否则自动连接第一台或添加设备
+const handleButtonClick = async () => {
+  await updateDeviceList();
+  
+  if (deviceList.value.length === 0) {
+    // 没有设备，添加新设备
+    handleAddWebAdbDevice();
+  } else if (deviceList.value.length > 1 && connected.value) {
+    // 多设备且已连接，显示设备选择菜单以便切换
+    showDeviceDrawer.value = true;
+  } else {
+    // 有设备但未连接，自动连接第一台（由 PairedDevices 组件处理）
+    window.dispatchEvent(new CustomEvent('device-list-update'));
+  }
+};
 
 // 添加 webadb 设备
 const handleAddWebAdbDevice = async () => {
@@ -210,9 +239,9 @@ const handleAddWebAdbDevice = async () => {
     if (newDevice) {
       console.log('New device added:', newDevice);
       // 触发 PairedDevices 组件更新设备列表
-      // 由于组件是隐藏的，我们需要通过事件或其他方式触发更新
-      // 这里可以通过触发 window 事件来通知 PairedDevices 组件
       window.dispatchEvent(new CustomEvent('device-list-update'));
+      // 更新本地设备列表
+      await updateDeviceList();
     }
   } catch (error) {
     console.error('Failed to add USB device:', error);
@@ -224,6 +253,17 @@ const handleAddWebAdbDevice = async () => {
     isAddingDevice.value = false;
   }
 };
+
+// 处理设备选择
+const handleSelectDevice = (device) => {
+  // 触发 PairedDevices 组件连接设备
+  window.dispatchEvent(new CustomEvent('select-device', { detail: device }));
+};
+
+// 初始化时获取设备列表
+onMounted(async () => {
+  await updateDeviceList();
+});
 </script>
 
 <template>
@@ -403,7 +443,7 @@ const handleAddWebAdbDevice = async () => {
       </div>
     </v-main>
 
-    <DeviceSelectDrawer v-model="showDeviceDrawer" />
+    <DeviceSelectDrawer v-model="showDeviceDrawer" @select-device="handleSelectDevice" />
   </v-app>
 </template>
 

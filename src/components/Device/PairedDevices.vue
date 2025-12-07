@@ -155,7 +155,7 @@ const updateUsbDeviceList = async () => {
     return usbDeviceList.value;
 };
 
-// 自动连接单台设备
+// 自动连接设备（单设备或多设备时连接第一台）
 const tryAutoConnect = async () => {
     // 如果已经连接或正在连接，不执行自动连接
     if (connectionStatus.value === 'connected' || connectionStatus.value === 'connecting') {
@@ -167,10 +167,10 @@ const tryAutoConnect = async () => {
         return;
     }
     
-    // 如果只有一台设备，尝试自动连接
-    if (deviceList.value.length === 1) {
+    // 如果有设备（单台或多台），自动连接第一台
+    if (deviceList.value.length > 0) {
         const device = deviceList.value[0];
-        console.log('尝试自动连接单台设备:', device.serial);
+        console.log('尝试自动连接设备:', device.serial, `(共${deviceList.value.length}台设备)`);
         autoConnectAttempted.value = true;
         await selectDevice(device, true);
     }
@@ -203,11 +203,27 @@ onMounted(async () => {
         await tryAutoConnect();
     };
     
+    // 监听设备选择事件
+    const handleSelectDevice = async (event) => {
+        const device = event.detail;
+        console.log('Device selected from drawer:', device);
+        if (device) {
+            // 在设备列表中找到对应的设备
+            await updateUsbDeviceList();
+            const foundDevice = usbDeviceList.value.find(d => d.serial === device.serial);
+            if (foundDevice) {
+                await selectDevice(foundDevice, false);
+            }
+        }
+    };
+    
     window.addEventListener('device-list-update', handleDeviceListUpdate);
+    window.addEventListener('select-device', handleSelectDevice);
     
     // 在组件卸载时移除事件监听
     const cleanup = () => {
         window.removeEventListener('device-list-update', handleDeviceListUpdate);
+        window.removeEventListener('select-device', handleSelectDevice);
     };
     
     // 将清理函数保存，在 onUnmounted 中调用
