@@ -143,8 +143,15 @@ const removeDevice = async (serial: string) => {
 const updateUsbDeviceList = async () => {
     isLoading.value = true;
     try {
+        // 使用 getDevices() 获取已授权的设备列表
+        // 注意：WebUSB 权限是会话级别的，刷新页面后需要重新授权
         usbDeviceList.value = await client.getUsbDeviceList();
         console.log('Updated USB device list:', usbDeviceList.value);
+        
+        // 如果没有设备，说明需要重新授权
+        if (usbDeviceList.value.length === 0) {
+            console.log('No authorized devices found. User may need to grant permission again.');
+        }
     } catch (error: any) {
         console.error('Failed to update USB device list:', error);
         errorMessage.value = '获取设备列表失败';
@@ -159,11 +166,13 @@ const updateUsbDeviceList = async () => {
 const tryAutoConnect = async () => {
     // 如果已经连接或正在连接，不执行自动连接
     if (connectionStatus.value === 'connected' || connectionStatus.value === 'connecting') {
+        console.log('Already connected or connecting, skip auto-connect');
         return;
     }
     
     // 如果已经尝试过自动连接，不再尝试
     if (autoConnectAttempted.value) {
+        console.log('Auto-connect already attempted, skip');
         return;
     }
     
@@ -172,7 +181,15 @@ const tryAutoConnect = async () => {
         const device = deviceList.value[0];
         console.log('尝试自动连接设备:', device.serial, `(共${deviceList.value.length}台设备)`);
         autoConnectAttempted.value = true;
-        await selectDevice(device, true);
+        try {
+            await selectDevice(device, true);
+        } catch (error) {
+            console.error('Auto-connect failed:', error);
+            // 如果自动连接失败，重置标志以便后续可以重试
+            autoConnectAttempted.value = false;
+        }
+    } else {
+        console.log('No devices available for auto-connect');
     }
 };
 
@@ -187,8 +204,13 @@ onMounted(async () => {
     }
 
     await updateUsbDeviceList();
-    // 尝试自动连接单台设备
-    await tryAutoConnect();
+    
+    // 延迟一下再尝试自动连接，确保设备列表稳定
+    setTimeout(async () => {
+        if (deviceList.value.length > 0 && !selected.value && connectionStatus.value !== 'connected' && connectionStatus.value !== 'connecting') {
+            await tryAutoConnect();
+        }
+    }, 200);
     
     watcher.value = new AdbDaemonWebUsbDeviceWatcher(async () => {
         console.log('Device list change detected');
@@ -242,8 +264,15 @@ onUnmounted(() => {
     }
 });
 
-watch(deviceList, async (newList) => {
+watch(deviceList, async (newList, oldList) => {
     console.log('Device list changed:', newList);
+    
+    // 如果设备列表从有设备变成空，可能是临时状态，不处理
+    if (newList.length === 0 && oldList && oldList.length > 0) {
+        console.log('Device list became empty, may be temporary, skipping auto-connect');
+        return;
+    }
+    
     if (selected.value) {
         const current = newList.find((device) => device.serial === selected.value?.serial);
         if (!current) {
@@ -263,8 +292,16 @@ watch(deviceList, async (newList) => {
             disconnectionMessage.value = '';
         }
     } else {
-        // 如果没有选中的设备，尝试自动连接
-        await tryAutoConnect();
+        // 如果没有选中的设备且有设备列表，延迟一下再尝试自动连接，等待设备列表稳定
+        if (newList.length > 0) {
+            // 延迟 100ms 确保设备列表稳定
+            setTimeout(async () => {
+                // 再次检查设备列表和连接状态
+                if (deviceList.value.length > 0 && !selected.value && connectionStatus.value !== 'connected' && connectionStatus.value !== 'connecting') {
+                    await tryAutoConnect();
+                }
+            }, 100);
+        }
     }
 });
 
@@ -273,6 +310,8 @@ const handleAddDevice = async () => {
     errorDetails.value = '';
     try {
         console.log('Attempting to add new USB device');
+        // requestDevice() 会弹出浏览器对话框请求设备权限
+        // 注意：这是 WebUSB API 的安全机制，每次都需要用户授权
         const newDevice = await client.addUsbDevice();
         if (newDevice) {
             console.log('New device added:', newDevice);
@@ -283,6 +322,10 @@ const handleAddDevice = async () => {
         }
     } catch (error: any) {
         console.error('Failed to add USB device:', error);
+        // 如果用户取消了设备选择，不显示错误
+        if (error.name === 'NotFoundError') {
+            return;
+        }
         errorMessage.value = '添加设备失败';
         errorDetails.value = `${error.message}。请确保设备已正确连接并启用了 USB 调试。`;
     }
