@@ -13,6 +13,7 @@ import state from "../components/Scrcpy/scrcpy-state";
 import AppManager from "../components/Device/AppManager.vue";
 import DeviceSelectDrawer from '../components/Device/DeviceSelectDrawer.vue'
 import GitHubStats from '../components/Common/GitHubStats.vue'
+import client from '../components/Scrcpy/adb-client'
 
 const { width } = useDisplay();
 const showRightPanel = computed(() => width.value >= 960);
@@ -193,6 +194,36 @@ const tabs = [
 ];
 
 const showDeviceDrawer = ref(false);
+const isAddingDevice = ref(false);
+
+// 添加 webadb 设备
+const handleAddWebAdbDevice = async () => {
+  if (!client.isSupportedWebUsb) {
+    console.error('WebUSB is not supported');
+    return;
+  }
+  
+  isAddingDevice.value = true;
+  try {
+    console.log('Attempting to add new USB device');
+    const newDevice = await client.addUsbDevice();
+    if (newDevice) {
+      console.log('New device added:', newDevice);
+      // 触发 PairedDevices 组件更新设备列表
+      // 由于组件是隐藏的，我们需要通过事件或其他方式触发更新
+      // 这里可以通过触发 window 事件来通知 PairedDevices 组件
+      window.dispatchEvent(new CustomEvent('device-list-update'));
+    }
+  } catch (error) {
+    console.error('Failed to add USB device:', error);
+    // 如果用户取消了选择，不显示错误
+    if (error.name !== 'NotFoundError') {
+      alert(`添加设备失败: ${error.message}`);
+    }
+  } finally {
+    isAddingDevice.value = false;
+  }
+};
 </script>
 
 <template>
@@ -205,10 +236,13 @@ const showDeviceDrawer = ref(false);
           max-height="24"
           class="mr-1 ml-10"
         />
-        <PairedDevices
-          @pair-device="onPairDevice"
-          @update-connection-status="handleConnectionStatus"
-        />
+        <!-- 隐藏的设备管理组件，用于自动连接功能 -->
+        <div style="display: none;">
+          <PairedDevices
+            @pair-device="onPairDevice"
+            @update-connection-status="handleConnectionStatus"
+          />
+        </div>
         <v-spacer />
 
         <div class="d-flex align-center">
@@ -309,16 +343,17 @@ const showDeviceDrawer = ref(false);
                       size="60"
                       color="black"
                       class="power-button mb-2"
-                      @click="showDeviceDrawer = true"
+                      :loading="isAddingDevice"
+                      @click="handleAddWebAdbDevice"
                     >
                       <v-icon x-large>mdi-power</v-icon>
                     </v-btn>
                   </div>
                   <div class="text-h6">
-                    {{ state.connecting ? '正在连接设备...' : '连接设备' }}
+                    连接设备
                   </div>
                   <div class="text-body-2">
-                    {{ state.connecting ? '请稍候...' : '请确保设备已开启USB调试模式' }}
+                    请确保设备已开启USB调试模式
                   </div>
                 </div>
               </div>

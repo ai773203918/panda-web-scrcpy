@@ -19,6 +19,7 @@ const connectionStatus = ref<'connected' | 'disconnected' | 'connecting'>('disco
 const autoReconnectAttempts = ref(0);
 const maxAutoReconnectAttempts = 3;
 const disconnectionMessage = ref('');
+const autoConnectAttempted = ref(false); // 防止重复自动连接
 
 const deviceList = computed(() => {
     return [...usbDeviceList.value];
@@ -28,10 +29,15 @@ const deviceOptions = computed(() => {
     return deviceList.value;
 });
 
-const selectDevice = async (device: any) => {
+const selectDevice = async (device: any, isAutoConnect: boolean = false) => {
     if (selected.value?.serial === device?.serial && connectionStatus.value === 'connected') {
         console.log('Device already connected:', device?.serial);
         return;
+    }
+
+    // 如果是手动连接，重置自动连接标志
+    if (!isAutoConnect) {
+        autoConnectAttempted.value = false;
     }
 
     connectionStatus.value = 'connecting';
@@ -52,14 +58,17 @@ const selectDevice = async (device: any) => {
             androidVersion: 'Unknown',
         };
         autoReconnectAttempts.value = 0;
+        autoConnectAttempted.value = true; // 标记已尝试自动连接
     } catch (error: any) {
-        handleConnectionError(error);
+        handleConnectionError(error, isAutoConnect);
+        // 如果自动连接失败，保持标志为 true，避免重复自动连接
+        // 但允许用户手动连接（手动连接时会重置标志）
     } finally {
         isLoading.value = false;
     }
 };
 
-const handleConnectionError = (error: any) => {
+const handleConnectionError = (error: any, isAutoConnect: boolean = false) => {
     if (error.message.includes('Unknown command: 48545541')) {
         errorMessage.value = '设备连接失败：未知命令';
         errorDetails.value = '请确保设备支持 ADB 调试，并且已在开发者选项中启用 USB 调试。';
@@ -73,6 +82,11 @@ const handleConnectionError = (error: any) => {
         errorMessage.value = '设备认证失败：无法处理认证请求';
         errorDetails.value =
             '请检查设备上的 ADB 授权设置。在设备上点击"允许 USB 调试"对话框，然后重试连接。';
+        // 如果是自动连接且需要授权，不显示错误，让用户手动操作
+        if (isAutoConnect) {
+            errorMessage.value = '';
+            errorDetails.value = '';
+        }
     } else {
         errorMessage.value = `设备连接失败`;
         errorDetails.value +=
@@ -141,6 +155,27 @@ const updateUsbDeviceList = async () => {
     return usbDeviceList.value;
 };
 
+// 自动连接单台设备
+const tryAutoConnect = async () => {
+    // 如果已经连接或正在连接，不执行自动连接
+    if (connectionStatus.value === 'connected' || connectionStatus.value === 'connecting') {
+        return;
+    }
+    
+    // 如果已经尝试过自动连接，不再尝试
+    if (autoConnectAttempted.value) {
+        return;
+    }
+    
+    // 如果只有一台设备，尝试自动连接
+    if (deviceList.value.length === 1) {
+        const device = deviceList.value[0];
+        console.log('尝试自动连接单台设备:', device.serial);
+        autoConnectAttempted.value = true;
+        await selectDevice(device, true);
+    }
+};
+
 onMounted(async () => {
     const supported = client.isSupportedWebUsb;
     console.log('WebUSB support:', supported);
@@ -152,16 +187,42 @@ onMounted(async () => {
     }
 
     await updateUsbDeviceList();
+    // 尝试自动连接单台设备
+    await tryAutoConnect();
+    
     watcher.value = new AdbDaemonWebUsbDeviceWatcher(async () => {
         console.log('Device list change detected');
         await updateUsbDeviceList();
     }, navigator.usb);
+    
+    // 监听设备列表更新事件
+    const handleDeviceListUpdate = async () => {
+        console.log('Device list update event received');
+        await updateUsbDeviceList();
+        autoConnectAttempted.value = false; // 重置标志，允许自动连接新设备
+        await tryAutoConnect();
+    };
+    
+    window.addEventListener('device-list-update', handleDeviceListUpdate);
+    
+    // 在组件卸载时移除事件监听
+    const cleanup = () => {
+        window.removeEventListener('device-list-update', handleDeviceListUpdate);
+    };
+    
+    // 将清理函数保存，在 onUnmounted 中调用
+    (window as any).__pairedDevicesCleanup = cleanup;
 });
 
 onUnmounted(() => {
     if (watcher.value) {
         watcher.value.dispose();
         console.log('Device watcher disposed');
+    }
+    // 移除设备列表更新事件监听
+    if ((window as any).__pairedDevicesCleanup) {
+        (window as any).__pairedDevicesCleanup();
+        delete (window as any).__pairedDevicesCleanup;
     }
 });
 
@@ -180,10 +241,14 @@ watch(deviceList, async (newList) => {
             disconnectionMessage.value = `设备 ${disconnectedDeviceName} 已断开连接。请检查设备连接状态。`;
             emit('update-connection-status', false);
             connectionStatus.value = 'disconnected';
+            autoConnectAttempted.value = false; // 重置自动连接标志
             await autoReconnect();
         } else {
             disconnectionMessage.value = '';
         }
+    } else {
+        // 如果没有选中的设备，尝试自动连接
+        await tryAutoConnect();
     }
 });
 
@@ -196,6 +261,9 @@ const handleAddDevice = async () => {
         if (newDevice) {
             console.log('New device added:', newDevice);
             await updateUsbDeviceList();
+            // 添加设备后，如果是第一台设备，尝试自动连接
+            autoConnectAttempted.value = false; // 重置标志，允许自动连接新设备
+            await tryAutoConnect();
         }
     } catch (error: any) {
         console.error('Failed to add USB device:', error);
