@@ -22,6 +22,7 @@ on:  # 定义触发工作流的事件
 
 permissions:  # 工作流权限
   contents: read  # 工作流需要读取仓库内容的权限
+  packages: write  # 工作流需要推送包到 GitHub Container Registry 的权限
 
 # 可以有多个工作流,多个工作流依次运行
 # 一个工作流运行由一个或多个作业组成，这些作业可以顺序或并行运行
