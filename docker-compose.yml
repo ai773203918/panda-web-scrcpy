@@ -1,0 +1,10 @@
+services:
+  panda-web-scrcpy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: panda-web-scrcpy:latest
+    container_name: panda-web-scrcpy
+    ports:
+      - "3000:3000"
+    restart: always
