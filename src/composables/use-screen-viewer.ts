@@ -1,6 +1,13 @@
 /**
  * 观看端 Hook
  * 用于连接到分享端并接收视频流，发送控制命令
+ * 
+ * 【ZWZW修改】集成远程控制权限接收
+ * - 新增权限状态管理
+ * - 接收分享端的权限同步消息
+ * - 提供权限状态查询接口
+ * - 【ZWZW新增】集成标注同步功能
+ * - 【ZWZW新增】优化视频尺寸适配
  */
 
 import { ref, onUnmounted } from 'vue';
@@ -9,6 +16,14 @@ import Peer from 'peerjs';
 import type { MediaConnection, DataConnection } from 'peerjs';
 import { PEER_CONFIG } from '@/services/peer-config';
 import type { RemoteControlCommand } from '@/services/command-types';
+// 【ZWZW新增】导入远程控制权限模块
+import {
+  RemoteControlLevel_ZWZW,
+  type RemoteControlConfig_ZWZW,
+  parsePermissionSyncMessage_ZWZW,
+} from '@/services/remote-control-types_ZWZW';
+// 【ZWZW新增】导入标注消息类型
+import type { AnnotationSyncMessage_ZWZW } from '@/composables/use-annotation_ZWZW';
 
 export type ViewerConnectionState = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
 
@@ -20,6 +35,22 @@ export interface UseScreenViewerReturn {
   connect: (hostPeerId: string) => Promise<void>;
   disconnect: () => void;
   sendCommand: (command: RemoteControlCommand) => void;
+  // 【ZWZW新增】权限相关返回值
+  permissionConfig: Ref<RemoteControlConfig_ZWZW>;
+  canControl: Ref<boolean>;
+  hasReceivedPermission: Ref<boolean>;
+  // 【ZWZW新增】标注相关
+  sendAnnotation_ZWZW: (msg: AnnotationSyncMessage_ZWZW) => void;
+  onAnnotationMessage_ZWZW: Ref<((data: unknown) => boolean) | null>;
+  // 【ZWZW新增】视频尺寸信息
+  videoWidth: Ref<number>;
+  videoHeight: Ref<number>;
+  // 【ZWZW新增】设备尺寸信息
+  deviceWidth: Ref<number>;
+  deviceHeight: Ref<number>;
+  deviceRotation: Ref<number>;
+  // 【新增】画质控制 - 支持帧率和分辨率缩放
+  sendQualityRequest: (frameRate: number, scale?: number) => void;
 }
 
 export function useScreenViewer(): UseScreenViewerReturn {
@@ -27,6 +58,25 @@ export function useScreenViewer(): UseScreenViewerReturn {
   const connectionState = ref<ViewerConnectionState>('idle');
   const error = ref<string | null>(null);
   const remoteStream = ref<MediaStream | null>(null);
+  
+  // 【ZWZW新增】权限状态
+  const permissionConfig = ref<RemoteControlConfig_ZWZW>({
+    level: RemoteControlLevel_ZWZW.READ_ONLY,
+    allowControl: false,
+  });
+  const canControl = ref(false);
+  const hasReceivedPermission = ref(false);
+  
+  // 【ZWZW新增】标注相关
+  const onAnnotationMessage_ZWZW = ref<((data: unknown) => boolean) | null>(null);
+  
+  // 【ZWZW新增】视频尺寸信息
+  const videoWidth = ref(0);
+  const videoHeight = ref(0);
+  // 【ZWZW新增】设备尺寸信息（来自分享端）
+  const deviceWidth = ref(0);
+  const deviceHeight = ref(0);
+  const deviceRotation = ref(0);
   
   let peer: Peer | null = null;
   let call: MediaConnection | null = null;
@@ -73,6 +123,33 @@ export function useScreenViewer(): UseScreenViewerReturn {
         dataConn.on('open', () => {
           console.log('[Viewer] 数据通道已建立');
         });
+        
+        // 【ZWZW新增】接收权限同步消息和标注消息
+        dataConn.on('data', (data) => {
+          // 首先检查权限消息
+          const permMessage = parsePermissionSyncMessage_ZWZW(data);
+          if (permMessage) {
+            permissionConfig.value = {
+              level: permMessage.level,
+              allowControl: permMessage.allowControl,
+            };
+            canControl.value = permMessage.allowControl;
+            hasReceivedPermission.value = true;
+            // 【ZWZW新增】提取设备尺寸信息
+            if (permMessage.deviceWidth && permMessage.deviceHeight) {
+              deviceWidth.value = permMessage.deviceWidth;
+              deviceHeight.value = permMessage.deviceHeight;
+              deviceRotation.value = permMessage.rotation ?? 0;
+            }
+            return;
+          }
+          
+          // 【ZWZW新增】处理标注消息
+          if (onAnnotationMessage_ZWZW.value) {
+            const handled = onAnnotationMessage_ZWZW.value(data);
+            if (handled) return;
+          }
+        });
 
         dataConn.on('error', (err) => {
           console.warn('[Viewer] 数据通道错误:', err);
@@ -80,6 +157,9 @@ export function useScreenViewer(): UseScreenViewerReturn {
 
         dataConn.on('close', () => {
           console.log('[Viewer] 数据通道关闭');
+          // 【ZWZW新增】重置权限状态
+          canControl.value = false;
+          hasReceivedPermission.value = false;
         });
 
         // 创建 dummy 视频流用于 SDP 协商
@@ -118,6 +198,21 @@ export function useScreenViewer(): UseScreenViewerReturn {
             console.log('[Viewer] 视频轨道状态:', track.readyState, '启用:', track.enabled);
             const settings = track.getSettings();
             console.log('[Viewer] 视频设置:', settings);
+            
+            // 【ZWZW新增】获取视频尺寸
+            if (settings.width && settings.height) {
+              videoWidth.value = settings.width;
+              videoHeight.value = settings.height;
+            }
+            
+            // 【ZWZW新增】监听视频轨道尺寸变化
+            track.addEventListener('resize', () => {
+              const newSettings = track.getSettings();
+              if (newSettings.width && newSettings.height) {
+                videoWidth.value = newSettings.width;
+                videoHeight.value = newSettings.height;
+              }
+            });
           }
           
           if (timeout) {
@@ -197,19 +292,61 @@ export function useScreenViewer(): UseScreenViewerReturn {
     connectionState.value = 'idle';
     remoteStream.value = null;
     error.value = null;
+    
+    // 【ZWZW新增】重置权限状态
+    canControl.value = false;
+    hasReceivedPermission.value = false;
+    permissionConfig.value = {
+      level: RemoteControlLevel_ZWZW.READ_ONLY,
+      allowControl: false,
+    };
 
     console.log('[Viewer] 已断开连接');
   }
 
   /**
    * 发送触摸事件
+   * 【ZWZW修改】添加权限检查
    */
   function sendCommand(command: RemoteControlCommand): void {
+    // 【ZWZW新增】检查控制权限
+    if (!canControl.value) {
+      console.warn('[Viewer_ZWZW] 无控制权限，命令已阻止');
+      return;
+    }
+    
     if (!dataConn?.open) {
       console.warn('[Viewer] 数据通道未建立，无法发送命令');
       return;
     }
     dataConn.send(command);
+  }
+  
+  /**
+   * 【ZWZW新增】发送标注消息
+   * 标注消息不需要控制权限，双方都可以绘制
+   */
+  function sendAnnotation_ZWZW(msg: AnnotationSyncMessage_ZWZW): void {
+    if (!dataConn?.open) {
+      console.warn('[Viewer_ZWZW] 数据通道未建立，无法发送标注');
+      return;
+    }
+    dataConn.send(msg);
+  }
+
+  /**
+   * 【新增】发送画质请求 - 支持帧率和分辨率缩放
+   */
+  function sendQualityRequest(frameRate: number, scale: number = 1): void {
+    if (!dataConn?.open) {
+      console.warn('[Viewer] 数据通道未建立，无法发送画质请求');
+      return;
+    }
+    dataConn.send({
+      type: 'quality_request',
+      frameRate,
+      scale, // 分辨率缩放比例 0.5, 0.75, 1
+    });
   }
 
   onUnmounted(() => {
@@ -224,5 +361,21 @@ export function useScreenViewer(): UseScreenViewerReturn {
     connect,
     disconnect,
     sendCommand,
+    // 【ZWZW新增】权限相关返回值
+    permissionConfig,
+    canControl,
+    hasReceivedPermission,
+    // 【ZWZW新增】标注相关
+    sendAnnotation_ZWZW,
+    onAnnotationMessage_ZWZW,
+    // 【ZWZW新增】视频尺寸
+    videoWidth,
+    videoHeight,
+    // 【ZWZW新增】设备尺寸
+    deviceWidth,
+    deviceHeight,
+    deviceRotation,
+    // 【新增】画质控制
+    sendQualityRequest,
   };
 }

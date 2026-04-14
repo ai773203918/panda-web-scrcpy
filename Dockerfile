@@ -11,7 +11,10 @@ RUN npm ci --ignore-scripts
 # 复制源代码
 COPY . .
 # 修改 vite 配置，将 base 改为根路径（用于 Docker 部署）
-RUN sed -i "s|base: '/panda-web-scrcpy/',|base: '/',|g" vite.config.ts
+# 使用不区分大小写的匹配，兼容不同的 base 路径命名
+RUN sed -i "s|base: '/[Pp]anda[Ss]crcpy/',|base: '/',|gI" vite.config.ts || \
+    sed -i "s|base: '/panda-web-scrcpy/',|base: '/',|g" vite.config.ts || \
+    sed -i "s|base: '[^']*PandaScrcpy[^']*',|base: '/',|g" vite.config.ts || true
 # 构建应用
 RUN npm run build
 

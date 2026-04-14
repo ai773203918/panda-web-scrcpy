@@ -1,7 +1,7 @@
 <template>
-  <v-container fluid class="remote-view pa-0">
+  <div class="remote-view">
     <ViewerPanel :initial-peer-id="initialPeerId" />
-  </v-container>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -13,10 +13,18 @@ defineProps<{
 </script>
 
 <style scoped>
+/* 【ZWZW修复】确保容器填充整个视口 */
 .remote-view {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
   height: 100vh;
-  width: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  background: #18181b;
 }
 </style>

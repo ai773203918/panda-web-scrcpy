@@ -1,5 +1,6 @@
 <template>
   <div class="share-root">
+    <!-- 分享按钮 -->
     <v-btn
       v-if="!isSharing"
       variant="text"
@@ -13,18 +14,21 @@
       分享
     </v-btn>
 
+    <!-- 分享中状态 -->
     <div v-else class="sharing-row">
       <button class="share-chip" @click="showShareDialog = true">
         <span class="share-dot" />
         <span class="share-label">分享中</span>
         <span v-if="viewerCount > 0" class="share-badge">{{ viewerCount }}</span>
       </button>
+      
       <button class="share-stop" title="停止分享" @click="handleStopShare">
         <v-icon size="14">mdi-stop</v-icon>
       </button>
     </div>
 
-    <v-dialog v-model="showShareDialog" max-width="400">
+    <!-- 分享对话框 -->
+    <v-dialog v-model="showShareDialog" max-width="420">
       <div class="share-dialog">
         <div class="sd-header">
           <span class="sd-title">屏幕分享中</span>
@@ -35,6 +39,27 @@
 
         <div class="sd-body">
           <p class="sd-desc">将链接发给观看者，可直接打开浏览器观看设备屏幕。</p>
+
+          <!-- 远程控制权限开关 -->
+          <div class="control-toggle_ZWZW">
+            <div class="toggle-header">
+              <v-icon size="16" color="primary">mdi-remote</v-icon>
+              <span class="toggle-label">远程控制</span>
+            </div>
+            <div class="toggle-row">
+              <v-switch
+                v-model="localAllowControl"
+                color="primary"
+                hide-details
+                density="compact"
+                @update:modelValue="handleControlToggle_ZWZW"
+              />
+              <span class="toggle-status">{{ localAllowControl ? '允许控制' : '仅观看' }}</span>
+            </div>
+            <p class="toggle-hint">
+              {{ localAllowControl ? '观看者可以远程操作设备' : '观看者只能观看，无法操作' }}
+            </p>
+          </div>
 
           <v-text-field
             :model-value="shareLink"
@@ -93,6 +118,14 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * 分享按钮组件 _ZWZW
+ * 
+ * 【ZWZW修改说明】
+ * - 使用单例模式的 useScreenShare
+ * - 修复权限同步问题
+ */
+
 import { ref, watch, computed } from 'vue';
 import { useScreenShare } from '@/composables/use-screen-share';
 import scrcpyState from '@/components/Scrcpy/scrcpy-state';
@@ -105,11 +138,35 @@ const {
   error,
   startSharing,
   stopSharing,
+  allowRemoteControl,
+  setAllowRemoteControl,
 } = useScreenShare();
 
 const showError = ref(false);
 const showCopied = ref(false);
 const showShareDialog = ref(false);
+
+// 本地控制权限状态
+const localAllowControl = ref(true);
+
+// 【ZWZW修复】监听分享状态变化，初始化权限
+watch(isSharing, (sharing) => {
+  if (sharing && peerId.value) {
+    showShareDialog.value = true;
+    localAllowControl.value = allowRemoteControl.value;
+  }
+});
+
+// 【ZWZW修复】监听 allowRemoteControl 变化，同步 localAllowControl
+// 确保停止分享后状态同步
+watch(allowRemoteControl, (newValue) => {
+  localAllowControl.value = newValue;
+});
+
+// 处理权限开关变化
+function handleControlToggle_ZWZW(value: boolean) {
+  setAllowRemoteControl(value);
+}
 
 const shareLink = computed(() => {
   if (!peerId.value) return '';
@@ -119,10 +176,6 @@ const shareLink = computed(() => {
 
 watch(error, (newError) => {
   if (newError) showError.value = true;
-});
-
-watch(isSharing, (sharing) => {
-  if (sharing && peerId.value) showShareDialog.value = true;
 });
 
 async function handleStartShare() {
@@ -278,6 +331,45 @@ async function copyPeerId() {
   font-size: 13px;
   color: var(--muted);
   margin: 0 0 14px;
+}
+
+.control-toggle_ZWZW {
+  padding: 12px;
+  margin-bottom: 14px;
+  background: rgba(var(--v-theme-primary), 0.04);
+  border: 1px solid rgba(var(--v-theme-primary), 0.12);
+  border-radius: 8px;
+}
+
+.toggle-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.toggle-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(24, 24, 27, 0.85);
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.toggle-status {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(24, 24, 27, 0.7);
+}
+
+.toggle-hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--muted);
 }
 
 .sd-viewers {
