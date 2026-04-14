@@ -69,7 +69,7 @@
                     <div class="log-cell tag">标签</div>
                     <div class="log-cell message">消息</div>
                 </div>
-                <div ref="logContainer" style="height: calc(100vh - 300px)">
+                <div ref="logContainer" class="log-scroll-area">
                     <v-virtual-scroll
                         :items="filteredLogs"
                         :item-size="28"
@@ -119,7 +119,7 @@
 
 <script setup lang="ts">
 // 脚本部分保持不变
-import { ref, onUnmounted, shallowRef, computed, nextTick, onMounted, watch } from 'vue';
+import { ref, shallowRef, computed, nextTick, watch } from 'vue';
 import client from '../Scrcpy/adb-client';
 import {
     Logcat,
@@ -353,6 +353,21 @@ const scrollToBottom = () => {
     height: 100%;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
+}
+
+.device-logcat :deep(.v-card-text) {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.log-scroll-area {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .header {

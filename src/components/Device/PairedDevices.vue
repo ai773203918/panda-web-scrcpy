@@ -4,7 +4,6 @@ import client from '../Scrcpy/adb-client';
 import { AdbDaemonWebUsbDeviceWatcher, AdbDaemonWebUsbDevice } from '@yume-chan/adb-daemon-webusb';
 import DeviceGuide from './DeviceGuide.vue';
 
-// 使用 Vue 3 的新语法定义 emit
 const emit = defineEmits(['pair-device', 'remove-device', 'update-connection-status']);
 
 const showDevices = ref(false);
@@ -28,9 +27,37 @@ const deviceOptions = computed(() => {
     return deviceList.value;
 });
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** USB/ADB 传输层疑似被占用（本页或其它客户端未释放）时可先 disconnect 再重连 */
+const isTransportOccupiedError = (e: unknown): boolean => {
+    const err = e as { name?: string; message?: string };
+    const name = (err?.name ?? '').toLowerCase();
+    const msg = (err?.message ?? String(e)).toLowerCase();
+    if (name === 'networkerror' || name === 'securityerror') return true;
+    if (msg.includes('failed to connect')) return true;
+    if (msg.includes('claim')) return true;
+    if (msg.includes('busy')) return true;
+    if (msg.includes('access denied')) return true;
+    if (msg.includes('could not open')) return true;
+    return false;
+};
+
+const connectWithOccupancyRecovery = async (device: AdbDaemonWebUsbDevice) => {
+    try {
+        await client.connect(device);
+    } catch (first: unknown) {
+        if (!isTransportOccupiedError(first)) {
+            throw first;
+        }
+        await client.disconnect();
+        await sleep(450);
+        await client.connect(device);
+    }
+};
+
 const selectDevice = async (device: any) => {
     if (selected.value?.serial === device?.serial && connectionStatus.value === 'connected') {
-        console.log('Device already connected:', device?.serial);
         return;
     }
 
@@ -41,7 +68,7 @@ const selectDevice = async (device: any) => {
     deviceInfo.value = null;
     emit('update-connection-status', false);
     try {
-        await client.connect(device);
+        await connectWithOccupancyRecovery(device);
         selected.value = device;
         connectionStatus.value = 'connected';
         showDevices.value = false;
@@ -90,15 +117,9 @@ const retryConnection = async () => {
 
 const autoReconnect = async () => {
     if (autoReconnectAttempts.value < maxAutoReconnectAttempts) {
-        console.log(
-            `Attempting auto-reconnect (${
-                autoReconnectAttempts.value + 1
-            }/${maxAutoReconnectAttempts})`
-        );
         await retryConnection();
         autoReconnectAttempts.value++;
     } else {
-        console.log('Max auto-reconnect attempts reached');
         errorMessage.value = '自动重连失败';
         errorDetails.value = '请手动重试连接或检查设备状态。';
     }
@@ -106,23 +127,19 @@ const autoReconnect = async () => {
 
 const toggleDevices = () => {
     showDevices.value = !showDevices.value;
-    console.log('Device list toggled:', showDevices.value);
 };
 
 const removeDevice = async (serial: string) => {
     isLoading.value = true;
-    console.log('Attempting to remove device:', serial);
     if (selected.value?.serial === serial) {
         selected.value = undefined;
         await client.disconnect();
         deviceInfo.value = null;
         emit('update-connection-status', false);
         connectionStatus.value = 'disconnected';
-        console.log('Disconnected from device:', serial);
     }
     usbDeviceList.value = usbDeviceList.value.filter((device) => device.serial !== serial);
     emit('remove-device', serial);
-    console.log('Device removed from list:', serial);
     isLoading.value = false;
 };
 
@@ -130,9 +147,7 @@ const updateUsbDeviceList = async () => {
     isLoading.value = true;
     try {
         usbDeviceList.value = await client.getUsbDeviceList();
-        console.log('Updated USB device list:', usbDeviceList.value);
     } catch (error: any) {
-        console.error('Failed to update USB device list:', error);
         errorMessage.value = '获取设备列表失败';
         errorDetails.value = `${error.message}。请检查设备连接并重试。`;
     } finally {
@@ -143,9 +158,7 @@ const updateUsbDeviceList = async () => {
 
 onMounted(async () => {
     const supported = client.isSupportedWebUsb;
-    console.log('WebUSB support:', supported);
     if (!supported) {
-        console.log('WebUSB is not supported');
         errorMessage.value = '浏览器不支持 WebUSB';
         errorDetails.value = '请使用支持 WebUSB 的现代浏览器，如 Chrome 或 Edge 的最新版本。';
         return;
@@ -153,7 +166,6 @@ onMounted(async () => {
 
     await updateUsbDeviceList();
     watcher.value = new AdbDaemonWebUsbDeviceWatcher(async () => {
-        console.log('Device list change detected');
         await updateUsbDeviceList();
     }, navigator.usb);
 });
@@ -161,16 +173,13 @@ onMounted(async () => {
 onUnmounted(() => {
     if (watcher.value) {
         watcher.value.dispose();
-        console.log('Device watcher disposed');
     }
 });
 
 watch(deviceList, async (newList) => {
-    console.log('Device list changed:', newList);
     if (selected.value) {
         const current = newList.find((device) => device.serial === selected.value?.serial);
         if (!current) {
-            console.log('Selected device not found in new list, disconnecting');
             await client.disconnect();
             const disconnectedDeviceName = selected.value.name || selected.value.serial;
             selected.value = undefined;
@@ -191,146 +200,317 @@ const handleAddDevice = async () => {
     errorMessage.value = '';
     errorDetails.value = '';
     try {
-        console.log('Attempting to add new USB device');
         const newDevice = await client.addUsbDevice();
-        if (newDevice) {
-            console.log('New device added:', newDevice);
-            await updateUsbDeviceList();
+        if (!newDevice) {
+            return;
         }
+        await updateUsbDeviceList();
+        const toConnect =
+            usbDeviceList.value.find((d) => d.serial === newDevice.serial) ?? newDevice;
+        await selectDevice(toConnect);
     } catch (error: any) {
-        console.error('Failed to add USB device:', error);
-        errorMessage.value = '添加设备失败';
-        errorDetails.value = `${error.message}。请确保设备已正确连接并启用了 USB 调试。`;
+        if (!errorMessage.value) {
+            errorMessage.value = '添加设备失败';
+            errorDetails.value = `${error.message}。请确保设备已正确连接并启用了 USB 调试。`;
+        }
     }
 };
+
+const openMenu = () => {
+    showDevices.value = true;
+};
+
+defineExpose({ handleAddDevice, openMenu });
 </script>
 
 <template>
-    <div class="paired-devices-component text-center">
+    <div class="paired-devices">
         <v-menu
             v-model="showDevices"
             transition="slide-y-transition"
             :close-on-content-click="false"
-            :nudge-right="40"
-            :offset-y="true"
-            offset-x
             min-width="300"
-            max-width="450"
+            max-width="420"
             location="bottom"
         >
             <template #activator="{ props }">
-                <v-btn color="primary" v-bind="props" append-icon="mdi-chevron-down">
-                    <v-tooltip activator="parent" location="end">设备切换</v-tooltip>
-                    <v-icon size="20">mdi-cellphone-link</v-icon>
-                    <span v-if="selected" class="text-body-1 font-weight-medium ml-2">
-                        {{ selected.name || selected.serial }}
+                <button class="device-trigger" v-bind="props">
+                    <v-icon size="16" class="trigger-icon">mdi-cellphone-link</v-icon>
+                    <span class="trigger-label">
+                        {{ selected ? (selected.name || selected.serial) : '选择设备' }}
                     </span>
-                    <span v-else class="text-body-1 font-weight-medium ml-2"> 选择设备 </span>
-                    <v-icon :color="connectionStatus === 'connected' ? 'green' : ''" class="ml-2">
-                        {{
-                            connectionStatus === 'connected'
-                                ? 'mdi-check-circle'
-                                : 'mdi-alert-circle'
-                        }}
-                    </v-icon>
-                </v-btn>
+                    <span
+                        class="trigger-dot"
+                        :class="connectionStatus === 'connected' ? 'trigger-dot--on' : 'trigger-dot--off'"
+                    />
+                    <v-icon size="14" class="trigger-chevron">mdi-chevron-down</v-icon>
+                </button>
             </template>
-            <v-card class="paired-devices-card mt-2" min-width="300" width="450" elevation="2">
-                <v-card-title class="d-flex align-center text-h6 pa-4 font-weight-bold">
-                    <span>配对的设备</span>
-                    <v-spacer />
-                    <v-btn variant="tonal" class="mr-2" size="40" @click="handleAddDevice">
-                        <v-icon>mdi-plus</v-icon>
-                        <v-tooltip activator="parent" location="bottom">配对设备</v-tooltip>
-                    </v-btn>
-                    <DeviceGuide />
-                </v-card-title>
-                <v-card-text v-if="errorMessage" class="error-container">
-                    <v-alert type="error" prominent>
-                        <h3>{{ errorMessage }}</h3>
-                        <p>{{ errorDetails }}</p>
-                        <v-btn v-if="selected" variant="text" @click="retryConnection" class="mt-2"
-                            >重试连接
-                        </v-btn>
-                        <v-btn variant="text" @click="handleAddDevice" class="mt-2 ml-2"
-                            >查看帮助
-                        </v-btn>
+            <div class="device-dropdown">
+                <div class="dd-header">
+                    <span class="dd-title">设备</span>
+                    <div class="dd-actions">
+                        <button class="dd-icon-btn" title="配对设备" @click="handleAddDevice">
+                            <v-icon size="18">mdi-plus</v-icon>
+                        </button>
+                        <DeviceGuide />
+                    </div>
+                </div>
+
+                <div v-if="errorMessage" class="dd-section">
+                    <v-alert type="error" variant="tonal" density="compact" class="text-body-2">
+                        <strong>{{ errorMessage }}</strong>
+                        <div class="text-caption mt-1">{{ errorDetails }}</div>
+                        <div class="mt-2 d-flex ga-2">
+                            <v-btn v-if="selected" size="x-small" variant="text" @click="retryConnection">重试</v-btn>
+                        </div>
                     </v-alert>
-                </v-card-text>
-                <v-card-text v-if="disconnectionMessage" class="disconnection-message">
-                    <v-alert type="warning" prominent>
+                </div>
+
+                <div v-if="disconnectionMessage" class="dd-section">
+                    <v-alert type="warning" variant="tonal" density="compact" class="text-body-2">
                         {{ disconnectionMessage }}
                     </v-alert>
-                </v-card-text>
-                <v-card-text v-if="!deviceList.length">
-                    <v-btn variant="outlined" block @click="handleAddDevice">
-                        <v-icon left class="mr-2">mdi-cellphone-link</v-icon>
+                </div>
+
+                <div v-if="!deviceList.length" class="dd-section dd-empty">
+                    <p class="text-body-2 text-medium-emphasis mb-3">暂无已配对设备</p>
+                    <v-btn variant="outlined" size="small" block @click="handleAddDevice">
+                        <v-icon start size="16">mdi-cellphone-link</v-icon>
                         添加 USB 设备
                     </v-btn>
-                </v-card-text>
-                <v-card-text v-else>
-                    <v-list dense>
-                        <v-list-item
-                            v-for="device in deviceOptions"
-                            :key="device.serial"
-                            class="py-2"
-                            @click="selectDevice(device)"
+                </div>
+
+                <div v-else class="dd-list">
+                    <button
+                        v-for="device in deviceOptions"
+                        :key="device.serial"
+                        class="dd-item"
+                        @click="selectDevice(device)"
+                    >
+                        <div class="dd-item-icon">
+                            <v-icon size="20" color="secondary">mdi-cellphone</v-icon>
+                        </div>
+                        <div class="dd-item-info">
+                            <span class="dd-item-name">{{ device.name || device.serial }}</span>
+                            <span class="dd-item-serial">{{ device.serial }}</span>
+                        </div>
+                        <v-icon
+                            v-if="selected?.serial === device.serial"
+                            size="16"
+                            color="success"
+                            class="mr-1"
                         >
-                            <template #prepend>
-                                <v-avatar color="black" size="40">
-                                    <v-icon color="white" size="24">mdi-cellphone</v-icon>
-                                </v-avatar>
-                            </template>
-                            <v-list-item-title>
-                                <span>{{ device.name || device.serial }}</span>
-                            </v-list-item-title>
-                            <v-list-item-subtitle>
-                                <span>{{ device.serial }}</span>
-                            </v-list-item-subtitle>
-                            <template #append>
-                                <v-icon
-                                    v-if="selected?.serial === device.serial"
-                                    class="mr-2"
-                                    color="green"
-                                >
-                                    mdi-check-circle
-                                </v-icon>
-                                <v-btn
-                                    icon
-                                    color="primary"
-                                    variant="text"
-                                    size="small"
-                                    style="width: 35px; height: 35px"
-                                    @click.stop="removeDevice(device.serial)"
-                                >
-                                    <v-icon>mdi-delete</v-icon>
-                                    <v-tooltip activator="parent" location="end"
-                                        >移除设备
-                                    </v-tooltip>
-                                </v-btn>
-                            </template>
-                        </v-list-item>
-                    </v-list>
-                </v-card-text>
-                <v-card-text>
-                    <v-btn variant="outlined" block @click="toggleDevices">关闭</v-btn>
-                </v-card-text>
-            </v-card>
+                            mdi-check-circle
+                        </v-icon>
+                        <button
+                            class="dd-icon-btn"
+                            title="移除设备"
+                            @click.stop="removeDevice(device.serial)"
+                        >
+                            <v-icon size="16">mdi-close</v-icon>
+                        </button>
+                    </button>
+                </div>
+
+                <div class="dd-footer">
+                    <button class="dd-close-btn" @click="toggleDevices">关闭</button>
+                </div>
+            </div>
         </v-menu>
     </div>
 </template>
 
 <style scoped>
-.paired-devices-component {
+.paired-devices {
     display: inline-block;
 }
 
-.paired-devices-card {
+.device-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
     border-radius: 8px;
+    background: rgb(var(--v-theme-surface));
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(24, 24, 27, 0.8);
+    transition: border-color 0.15s, background 0.15s;
+    outline: none;
+    white-space: nowrap;
+    max-width: 280px;
 }
 
-.error-container,
-.disconnection-message {
-    margin-bottom: 16px;
+.device-trigger:hover {
+    border-color: var(--border-hover);
+    background: rgba(24, 24, 27, 0.02);
+}
+
+.trigger-icon {
+    flex-shrink: 0;
+    opacity: 0.5;
+}
+
+.trigger-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.trigger-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.trigger-dot--on {
+    background: #22c55e;
+}
+
+.trigger-dot--off {
+    background: rgba(24, 24, 27, 0.2);
+}
+
+.trigger-chevron {
+    opacity: 0.4;
+    flex-shrink: 0;
+}
+
+.device-dropdown {
+    background: rgb(var(--v-theme-surface));
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+    overflow: hidden;
+    min-width: 300px;
+    margin-top: 4px;
+}
+
+.dd-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px 8px;
+}
+
+.dd-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(24, 24, 27, 0.55);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.dd-actions {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.dd-icon-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    cursor: pointer;
+    color: rgba(24, 24, 27, 0.5);
+    transition: background 0.15s;
+}
+
+.dd-icon-btn:hover {
+    background: rgba(24, 24, 27, 0.06);
+}
+
+.dd-section {
+    padding: 0 14px 10px;
+}
+
+.dd-empty {
+    padding: 16px 14px;
+    text-align: center;
+}
+
+.dd-list {
+    padding: 0 6px 4px;
+}
+
+.dd-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 8px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s;
+}
+
+.dd-item:hover {
+    background: rgba(24, 24, 27, 0.04);
+}
+
+.dd-item-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: rgba(24, 24, 27, 0.04);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.dd-item-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.dd-item-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(24, 24, 27, 0.85);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dd-item-serial {
+    font-size: 11px;
+    color: rgba(24, 24, 27, 0.4);
+}
+
+.dd-footer {
+    padding: 8px 14px 12px;
+    border-top: 1px solid var(--border);
+}
+
+.dd-close-btn {
+    width: 100%;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(24, 24, 27, 0.6);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.dd-close-btn:hover {
+    background: rgba(24, 24, 27, 0.03);
+    border-color: var(--border-hover);
 }
 </style>

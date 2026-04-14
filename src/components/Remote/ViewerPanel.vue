@@ -1,66 +1,57 @@
 <template>
   <div class="viewer-panel">
-    <!-- 连接表单 -->
     <div v-if="!isConnected" class="connection-form">
-      <v-card flat>
-        <v-card-title class="text-h6">
-          <v-icon start>mdi-cast-connected</v-icon>
-          远程观看
-        </v-card-title>
-        <v-card-text>
+      <div class="connect-card">
+        <div class="cc-header">
+          <v-icon size="20" color="secondary" class="mr-2">mdi-cast-connected</v-icon>
+          <span class="cc-title">远程观看</span>
+        </div>
+        <div class="cc-body">
           <v-text-field
             v-model="hostPeerId"
             label="分享 ID"
             placeholder="输入分享端的 Peer ID"
-            variant="outlined"
-            density="compact"
             :disabled="connectionState === 'connecting'"
             :error-messages="error || undefined"
             hide-details="auto"
             @keyup.enter="handleConnect"
           />
-        </v-card-text>
-        <v-card-actions>
+        </div>
+        <div class="cc-actions">
           <v-spacer />
           <v-btn
             color="primary"
-            variant="flat"
+            size="small"
             :loading="connectionState === 'connecting'"
             :disabled="!hostPeerId.trim()"
             @click="handleConnect"
           >
-            <v-icon start>mdi-connection</v-icon>
+            <v-icon start size="16">mdi-connection</v-icon>
             连接
           </v-btn>
-        </v-card-actions>
-      </v-card>
+        </div>
+      </div>
     </div>
 
-    <!-- 视频显示区域 -->
-    <div v-else class="video-container">
-      <!-- 状态栏 -->
+    <div v-else class="video-area">
       <div class="status-bar">
-        <v-chip
-          color="success"
-          variant="flat"
-          size="small"
-        >
-          <v-icon start size="small">mdi-check-circle</v-icon>
+        <span class="status-chip">
+          <span class="status-dot" />
           已连接
-        </v-chip>
+        </span>
         <v-spacer />
         <v-btn
-          color="error"
           variant="text"
-          size="small"
+          size="x-small"
+          color="error"
+          class="text-none"
           @click="handleDisconnect"
         >
-          <v-icon start size="small">mdi-close</v-icon>
+          <v-icon start size="14">mdi-close</v-icon>
           断开
         </v-btn>
       </div>
 
-      <!-- 视频播放器 -->
       <div class="video-wrapper" ref="videoWrapper">
         <video
           ref="videoElement"
@@ -75,62 +66,34 @@
         />
       </div>
 
-      <!-- 导航按钮 -->
-      <div class="navigation-bar">
-        <v-btn
-          variant="text"
-          size="large"
-          @click="touchController.sendBackKey"
-        >
-          <v-icon>mdi-arrow-left</v-icon>
-        </v-btn>
-        <v-btn
-          variant="text"
-          size="large"
-          @click="touchController.sendHomeKey"
-        >
-          <v-icon>mdi-circle-outline</v-icon>
-        </v-btn>
-        <v-btn
-          variant="text"
-          size="large"
-          @click="touchController.sendRecentsKey"
-        >
-          <v-icon>mdi-square-outline</v-icon>
-        </v-btn>
+      <div class="nav-bar">
+        <button class="nav-btn" @click="touchController.sendBackKey">
+          <v-icon size="20">mdi-arrow-left</v-icon>
+        </button>
+        <button class="nav-btn" @click="touchController.sendHomeKey">
+          <v-icon size="20">mdi-circle-outline</v-icon>
+        </button>
+        <button class="nav-btn" @click="touchController.sendRecentsKey">
+          <v-icon size="20">mdi-square-outline</v-icon>
+        </button>
       </div>
     </div>
 
-    <!-- 错误/断开提示 -->
-    <v-snackbar
-      v-model="showError"
-      color="error"
-      timeout="5000"
-    >
+    <v-snackbar v-model="showError" color="error" timeout="5000">
       {{ error }}
       <template v-slot:actions>
-        <v-btn
-          variant="text"
-          @click="showError = false"
-        >
-          关闭
-        </v-btn>
+        <v-btn variant="text" size="small" @click="showError = false">关闭</v-btn>
       </template>
     </v-snackbar>
 
-    <!-- 断开连接提示 -->
-    <v-snackbar
-      v-model="showDisconnected"
-      color="warning"
-      timeout="3000"
-    >
+    <v-snackbar v-model="showDisconnected" color="warning" timeout="3000">
       连接已断开
     </v-snackbar>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, computed } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 import { useScreenViewer } from '@/composables/use-screen-viewer';
 import { useTouchController } from '@/composables/use-touch-controller';
 
@@ -154,74 +117,41 @@ const {
   sendCommand,
 } = useScreenViewer();
 
-// 触摸控制器
 const touchController = useTouchController(sendCommand, videoElement);
 
-// 如果有初始 Peer ID，自动填充并连接
 onMounted(() => {
   if (props.initialPeerId) {
     hostPeerId.value = props.initialPeerId;
-    // 延迟一点自动连接，让组件完全挂载
     setTimeout(() => {
       handleConnect();
     }, 500);
   }
 });
 
-// 监听错误
 watch(error, (newError) => {
-  if (newError) {
-    showError.value = true;
-  }
+  if (newError) showError.value = true;
 });
 
-// 监听连接状态
 watch(connectionState, (newState, oldState) => {
   if (oldState === 'connected' && newState === 'disconnected') {
     showDisconnected.value = true;
   }
 });
 
-// 绑定远程流到视频元素
 function bindStreamToVideo() {
   if (videoElement.value && remoteStream.value) {
-    console.log('[ViewerPanel] 绑定远程流到视频元素');
-    console.log('[ViewerPanel] 视频元素尺寸:', videoElement.value.clientWidth, 'x', videoElement.value.clientHeight);
-    
     videoElement.value.srcObject = remoteStream.value;
-    
-    // 监听视频元素事件
-    videoElement.value.onloadedmetadata = () => {
-      console.log('[ViewerPanel] 视频元数据已加载:', videoElement.value?.videoWidth, 'x', videoElement.value?.videoHeight);
-    };
-    
-    videoElement.value.onplaying = () => {
-      console.log('[ViewerPanel] 视频开始播放');
-    };
-    
-    videoElement.value.onerror = (e) => {
-      console.error('[ViewerPanel] 视频错误:', e);
-    };
-    
-    // 确保视频开始播放
     videoElement.value.play().catch((err) => {
       console.warn('[ViewerPanel] 视频自动播放失败:', err);
     });
   }
 }
 
-// 监听远程流变化
 watch(remoteStream, bindStreamToVideo);
-
-// 监听视频元素挂载（当 isConnected 变为 true 时，视频元素才会渲染）
 watch(videoElement, bindStreamToVideo);
 
-/**
- * 连接到分享端
- */
 async function handleConnect() {
   if (!hostPeerId.value.trim()) return;
-
   try {
     await connect(hostPeerId.value.trim());
   } catch (err) {
@@ -229,9 +159,6 @@ async function handleConnect() {
   }
 }
 
-/**
- * 断开连接
- */
 function handleDisconnect() {
   disconnect();
   hostPeerId.value = '';
@@ -254,7 +181,40 @@ function handleDisconnect() {
   padding: 16px;
 }
 
-.video-container {
+.connect-card {
+  max-width: 400px;
+  width: 100%;
+  background: rgb(var(--v-theme-surface));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.cc-header {
+  display: flex;
+  align-items: center;
+  padding: 16px 16px 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(24, 24, 27, 0.85);
+}
+
+.cc-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.cc-body {
+  padding: 16px 16px 8px;
+}
+
+.cc-actions {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px 16px;
+}
+
+.video-area {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -263,8 +223,24 @@ function handleDisconnect() {
 .status-bar {
   display: flex;
   align-items: center;
-  padding: 8px 16px;
-  background: rgba(0, 0, 0, 0.05);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #16a34a;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
 }
 
 .video-wrapper {
@@ -272,7 +248,7 @@ function handleDisconnect() {
   display: flex;
   justify-content: center;
   align-items: center;
-  background: #000;
+  background: #18181b;
   overflow: hidden;
   touch-action: none;
 }
@@ -284,10 +260,28 @@ function handleDisconnect() {
   touch-action: none;
 }
 
-.navigation-bar {
+.nav-bar {
   display: flex;
   justify-content: space-around;
-  padding: 8px;
-  background: rgba(0, 0, 0, 0.05);
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 36px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(24, 24, 27, 0.6);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.nav-btn:hover {
+  background: rgba(24, 24, 27, 0.06);
 }
 </style>

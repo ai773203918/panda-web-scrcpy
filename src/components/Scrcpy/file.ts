@@ -1,4 +1,4 @@
-import { WrapReadableStream, WritableStream, ReadableStream } from '@yume-chan/stream-extra';
+import { WritableStream, ReadableStream } from '@yume-chan/stream-extra';
 
 interface PickFileOptions {
     accept?: string;

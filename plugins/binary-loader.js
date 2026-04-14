@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 
-export function binaryLoader(options = {}) {
+export function binaryLoader() {
     const binRegex = /\?binary$/;
     return {
         name: 'binary-loader',
@@ -10,7 +10,7 @@ export function binaryLoader(options = {}) {
             if (!id.match(binRegex)) {
                 return;
             }
-            const [path, query] = id.split('?', 2);
+            const [path] = id.split('?', 2);
 
             try {
                 const data = fs.readFileSync(path);

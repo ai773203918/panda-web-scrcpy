@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted, nextTick } from 'vue';
 import { encodeUtf8 } from '@yume-chan/adb';
 import client from '../Scrcpy/adb-client';
 import { Terminal } from '@xterm/xterm';
@@ -7,6 +7,18 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 
 const term = ref<HTMLDivElement | null>(null);
+
+let terminal: Terminal | null = null;
+let fitAddon: FitAddon | null = null;
+let termResizeObserver: ResizeObserver | null = null;
+
+function fitTerminal() {
+    try {
+        fitAddon?.fit();
+    } catch {
+        /* 容器尺寸为 0 时可能抛错 */
+    }
+}
 
 onMounted(async () => {
     try {
@@ -16,10 +28,17 @@ onMounted(async () => {
     }
 });
 
-let terminal: Terminal | null = null;
-let fitAddon: FitAddon | null = null;
+onUnmounted(() => {
+    termResizeObserver?.disconnect();
+    termResizeObserver = null;
+    terminal?.dispose();
+    terminal = null;
+    fitAddon = null;
+});
 
 async function startTerminal() {
+    termResizeObserver?.disconnect();
+    termResizeObserver = null;
     if (terminal) {
         terminal.dispose();
         terminal = null;
@@ -34,19 +53,19 @@ async function startTerminal() {
         fontFamily: 'Roboto Mono, monospace',
         fontSize: 14,
         lineHeight: 1.2,
-        allowTransparency: true,
+        allowTransparency: false,
         theme: {
-            background: '#2c3e50',
-            foreground: '#ecf0f1',
+            background: '#000000',
+            foreground: '#e8e8e8',
             cursor: '#e74c3c',
-            black: '#2c3e50',
+            black: '#000000',
             red: '#e74c3c',
             green: '#2ecc71',
             yellow: '#f1c40f',
             blue: '#3498db',
             magenta: '#9b59b6',
             cyan: '#1abc9c',
-            white: '#ecf0f1',
+            white: '#e8e8e8',
         },
     });
 
@@ -54,8 +73,16 @@ async function startTerminal() {
     terminal.loadAddon(fitAddon);
 
     if (term.value) {
+        termResizeObserver?.disconnect();
         terminal.open(term.value);
-        fitAddon.fit();
+        await nextTick();
+        requestAnimationFrame(() => {
+            fitTerminal();
+        });
+        termResizeObserver = new ResizeObserver(() => {
+            fitTerminal();
+        });
+        termResizeObserver.observe(term.value);
     } else {
         console.error('Terminal container not found');
         return;
@@ -97,40 +124,84 @@ function clearTerminal() {
 
 <template>
     <div class="device-shell-card">
-        <v-card-title class="d-flex align-center justify-space-between">
-            <div class="d-flex align-center">设备终端器</div>
-            <div>
-                <v-btn color="primary" variant="text" @click="startTerminal" class="mr-2">
-                    <v-icon>mdi-restart</v-icon>
-                    重新启动
+        <div class="shell-toolbar">
+            <span class="shell-title">设备终端</span>
+            <div class="shell-actions">
+                <v-btn color="primary" variant="text" size="small" @click="startTerminal" class="mr-1">
+                    <v-icon size="16">mdi-restart</v-icon>
+                    重启
                 </v-btn>
-                <v-btn color="secondary" variant="text" @click="clearTerminal">
-                    <v-icon>mdi-delete</v-icon>
+                <v-btn color="secondary" variant="text" size="small" @click="clearTerminal">
+                    <v-icon size="16">mdi-delete</v-icon>
                     清除
                 </v-btn>
             </div>
-        </v-card-title>
-        <v-card-text>
-            <div ref="term" class="terminal-container" />
-        </v-card-text>
+        </div>
+        <div ref="term" class="terminal-container" />
     </div>
 </template>
 
 <style scoped>
 .device-shell-card {
-    margin: 0 auto;
-    transition: all 0.3s ease;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+.shell-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 8px;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.shell-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(24, 24, 27, 0.85);
+}
+
+.shell-actions {
+    display: flex;
+    align-items: center;
 }
 
 .terminal-container {
-    border: 1px solid #34495e;
-    border-radius: 8px;
-    padding: 8px;
-    background-color: #2c3e50;
-    color: #ecf0f1;
+    flex: 1;
+    min-height: 0;
     width: 100%;
-    height: auto;
+    padding: 0;
+    position: relative;
+    background-color: #000000;
     overflow: hidden;
-    box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.1);
+}
+
+/* xterm 默认不随 flex 父级撑满高度，需强制铺满容器 */
+.terminal-container :deep(.xterm) {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0 !important;
+    margin: 0 !important;
+    box-sizing: border-box;
+}
+
+.terminal-container :deep(.xterm-viewport),
+.terminal-container :deep(.xterm-screen) {
+    background-color: #000000 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    box-sizing: border-box;
+}
+
+.terminal-container :deep(.xterm-screen canvas) {
+    left: 0 !important;
+    top: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
 }
 </style>

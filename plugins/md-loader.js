@@ -2,31 +2,9 @@ import fs from 'node:fs';
 import { compileTemplate } from '@vue/compiler-sfc';
 import MarkdownIt from 'markdown-it';
 
-const __doc__ = `
-    ## How to use:
+// md-loader: add to vite plugins + assetsInclude for *.md (see repo docs)
 
-vite.config.js:
-import Markdown from './plugins/md-loader'
-export default defineConfig({
-  plugins: [
-    vue(),
-    Markdown(),
-  ],
-  assetsInclude: ["**/*.md"]
-})
-
-
-in vue:
-
-import EnableDebugContent from '../docs/enabledebug.md'
-
-<template>
-    <EnableDebugContent />
-</template>
-
-`;
-
-export function mdLoader(options = {}) {
+export function mdLoader() {
     const mdRegex = /\.md$/;
     return {
         name: 'markdown-loader',
@@ -36,7 +14,7 @@ export function mdLoader(options = {}) {
             if (!id.match(mdRegex)) {
                 return;
             }
-            const [path, query] = id.split('?', 2);
+            const [path] = id.split('?', 2);
 
             let data;
             try {

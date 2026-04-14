@@ -1,73 +1,65 @@
 <template>
   <v-card class="info-card" elevation="0">
-    <v-card-text class="pa-4">
-      <div class="text-subtitle-1 mb-4">设备信息</div>
+    <div class="info-card-head">
+      <span class="info-card-title">设备信息</span>
+    </div>
+    <v-card-text class="info-card-body pa-0">
       <div class="info-table">
-        <div class="info-row">
-          <div class="info-label">品牌</div>
-          <div class="info-value">{{ deviceInfo.brand }}</div>
-          <div class="info-label">root 状态</div>
-          <div class="info-value">{{ deviceInfo.rootState }}</div>
+        <div class="info-item">
+          <span class="info-label">品牌</span>
+          <span class="info-value">{{ deviceInfo.brand }}</span>
         </div>
-        <div class="info-row">
-          <div class="info-label">型号</div>
-          <div class="info-value">{{ deviceInfo.deviceModel }}</div>
-          <div class="info-label">Bootloader 锁</div>
-          <div class="info-value">{{ bootloaderStatus }}</div>
+        <div class="info-item">
+          <span class="info-label">型号</span>
+          <span class="info-value">{{ deviceInfo.deviceModel }}</span>
         </div>
-        <div class="info-row">
-          <div class="info-label">代号</div>
-          <div class="info-value">{{ deviceInfo.device }}</div>
-          <div class="info-label">A/B槽位</div>
-          <div class="info-value">{{ abPartitionStatus }}</div>
+        <div class="info-item">
+          <span class="info-label">代号</span>
+          <span class="info-value">{{ deviceInfo.device }}</span>
         </div>
-        <div class="info-row">
-          <div class="info-label">安卓SDK</div>
-          <div class="info-value">Android {{ deviceInfo.androidVersion }}({{ deviceInfo.sdkVersionCode }})</div>
-          <div class="info-label">VNDK 版本</div>
-          <div class="info-value">{{ deviceInfo.sdkVersionCode }}</div>
+        <div class="info-item">
+          <span class="info-label">安卓</span>
+          <span class="info-value">{{ deviceInfo.androidVersion }} (SDK {{ deviceInfo.sdkVersionCode }})</span>
         </div>
-        <div class="info-row">
-          <div class="info-label">CPU 架构</div>
-          <div class="info-value">{{ deviceInfo.cpuAbi }}</div>
-          <div class="info-label">CPU 代号</div>
-          <div class="info-value">{{ deviceInfo.cpuInfo }}</div>
+        <div class="info-item">
+          <span class="info-label">CPU</span>
+          <span class="info-value">{{ deviceInfo.cpuAbi }} · {{ deviceInfo.cpuInfo }}</span>
         </div>
-        <div class="info-row">
-          <div class="info-label">分辨率</div>
-          <div class="info-value">{{ deviceInfo.resolution }}</div>
-          <div class="info-label">开机时间</div>
-          <div class="info-value">{{ uptime }}</div>
+        <div class="info-item">
+          <span class="info-label">分辨率</span>
+          <span class="info-value">{{ deviceInfo.resolution }} @ {{ deviceInfo.screenDensity }}dpi</span>
         </div>
-        <div class="info-row">
-          <div class="info-label">显示密度</div>
-          <div class="info-value">{{ deviceInfo.screenDensity }}</div>
-          <div class="info-label">闪存类型</div>
-          <div class="info-value">{{ deviceInfo.storageType }}</div>
+        <div class="info-item">
+          <span class="info-label">IP</span>
+          <span class="info-value">{{ deviceInfo.ipAddress || '—' }}</span>
         </div>
-        <div class="info-row">
-          <div class="info-label">IP 地址</div>
-          <div class="info-value">{{ deviceInfo.ipAddress || '-' }}</div>
+        <div class="info-item">
+          <span class="info-label">序列号</span>
+          <span class="info-value">{{ deviceInfo.serialNumber }}</span>
         </div>
-        <div class="info-row">
-          <div class="info-label">主板 ID</div>
-          <div class="info-value">{{ deviceInfo.board || '-' }}</div>
+        <div class="info-item">
+          <span class="info-label">Root</span>
+          <span class="info-value">{{ deviceInfo.rootState }}</span>
         </div>
-        <div class="info-row">
-          <div class="info-label">硬件平台</div>
-          <div class="info-value full-width">{{ deviceInfo.hardware }}</div>
+        <div class="info-item">
+          <span class="info-label">BL 锁</span>
+          <span class="info-value">{{ bootloaderStatus }}</span>
         </div>
-        <div class="info-row">
-          <div class="info-label">序列号</div>
-          <div class="info-value full-width">{{ deviceInfo.serialNumber }}</div>
+        <div class="info-item">
+          <span class="info-label">A/B 槽</span>
+          <span class="info-value">{{ abPartitionStatus }}</span>
         </div>
-        <div class="info-row">
-          <div class="info-label">编译版本</div>
-          <div class="info-value full-width">{{ deviceInfo.fingerPrint }}</div>
+        <div class="info-item">
+          <span class="info-label">闪存</span>
+          <span class="info-value">{{ deviceInfo.storageType }}</span>
         </div>
-        <div class="info-row">
-          <div class="info-label">内核版本</div>
-          <div class="info-value full-width">{{ deviceInfo.kernelVersion }}</div>
+        <div class="info-item info-item--span">
+          <span class="info-label">开机</span>
+          <span class="info-value">{{ uptime }}</span>
+        </div>
+        <div class="info-item info-item--span">
+          <span class="info-label">内核</span>
+          <span class="info-value info-value--wrap">{{ deviceInfo.kernelVersion }}</span>
         </div>
       </div>
     </v-card-text>
@@ -84,7 +76,6 @@ const props = defineProps({
   }
 });
 
-// 计算属性：Bootloader 状态
 const bootloaderStatus = computed(() => {
   if (['green'].includes(props.deviceInfo.bootloader)) {
     return 'locked';
@@ -92,7 +83,6 @@ const bootloaderStatus = computed(() => {
   return 'unlocked';
 });
 
-// 计算属性：A/B 分区状态
 const abPartitionStatus = computed(() => {
   switch (props.deviceInfo.abPartition) {
     case '_a':
@@ -104,91 +94,117 @@ const abPartitionStatus = computed(() => {
   }
 });
 
-
 const formatSeconds = (seconds) => {
   const parts = [];
   const d = Math.floor(seconds / 86400);
   const h = Math.floor(seconds % 86400 / 3600);
   const m = Math.floor(seconds % 3600 / 60);
   const s = Math.floor(seconds % 60);
-  
+
   if (d) parts.push(d + '天');
   if (h) parts.push(h + '小时');
   if (m) parts.push(m + '分');
   if (s || !parts.length) parts.push(s + '秒');
-  
+
   return parts.join('');
 };
-// 计算属性：开机时间
+
 const uptime = computed(() => {
-  return formatSeconds(props.deviceInfo.uptime);
+  const s = Number(props.deviceInfo.uptime);
+  return formatSeconds(Number.isFinite(s) ? s : 0);
 });
 </script>
 
 <style scoped>
 .info-card {
-  background: white;
-  border-radius: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: rgb(var(--v-theme-surface));
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.info-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(24, 24, 27, 0.02);
+}
+
+.info-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(24, 24, 27, 0.88);
+  letter-spacing: 0.02em;
+}
+
+.info-card-body {
+  padding: 0 !important;
 }
 
 .info-table {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.info-row {
   display: grid;
-  grid-template-columns: minmax(80px, auto) minmax(0, 1fr) minmax(100px, auto) minmax(0, 1fr);
-  gap: 16px;
-  align-items: center;
-  min-height: 32px;
-  padding: 0 4px;
+  grid-template-columns: 1fr;
+  gap: 0;
 }
 
-.info-row:hover {
-  background-color: rgba(0, 0, 0, 0.02);
-  border-radius: 4px;
+@media (min-width: 400px) {
+  .info-table {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.info-item {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px 10px;
+  align-items: baseline;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+}
+
+@media (min-width: 400px) {
+  .info-item:nth-child(odd) {
+    border-right: 1px solid var(--border);
+  }
+}
+
+.info-item--span {
+  grid-column: 1 / -1;
+  border-right: none !important;
+  grid-template-columns: 72px minmax(0, 1fr);
+}
+
+@media (max-width: 399px) {
+  .info-item--span {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+}
+
+.info-item:last-child {
+  border-bottom: none;
 }
 
 .info-label {
   font-weight: 500;
-  color: var(--v-text-primary);
+  font-size: 12px;
+  color: var(--muted);
   white-space: nowrap;
-  font-size: 14px;
 }
 
 .info-value {
-  color: var(--v-text-secondary);
+  font-size: 12px;
+  color: rgba(24, 24, 27, 0.88);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
-  min-width: 0;
 }
 
-.full-width {
-  grid-column: 2 / -1;
-}
-
-@media (max-width: 768px) {
-  .info-row {
-    grid-template-columns: minmax(80px, auto) 1fr;
-  }
-
-  .info-row > *:nth-child(3),
-  .info-row > *:nth-child(4) {
-    grid-column: auto;
-  }
-
-  .full-width {
-    grid-column: 2;
-  }
-}
-
-/* 适配暗色主题 */
-:deep(.v-theme--dark) .info-card {
-  background-color: var(--v-surface-variant-dark);
+.info-value--wrap {
+  white-space: normal;
+  word-break: break-all;
+  line-height: 1.45;
 }
 </style>

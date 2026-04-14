@@ -53,7 +53,7 @@ export class AdbClient {
                     'Failed to connect to device. Please check if the device is connected and try again.'
                 );
             }
-            return;
+            throw e instanceof Error ? e : new Error(String(e));
         }
 
         this.device = new Adb(
@@ -77,6 +77,24 @@ export class AdbClient {
         this.device = undefined;
         this.serial = undefined;
         this.name = undefined;
+    }
+
+    /**
+     * 结束设备上可能残留的 scrcpy 服务端，避免端口/进程占用导致无法再次投屏。
+     * 依赖已建立的 Adb 会话；失败时静默忽略。
+     */
+    async killScrcpyServerOnDevice(): Promise<void> {
+        const adb = this.device;
+        if (!adb?.subprocess?.noneProtocol) {
+            return;
+        }
+        try {
+            await adb.subprocess.noneProtocol.spawnWaitText(
+                "sh -c 'pkill -9 -f com.genymobile.scrcpy 2>/dev/null; pkill -9 -f scrcpy 2>/dev/null; true'",
+            );
+        } catch {
+            // 无 pkill、权限或进程不存在时忽略
+        }
     }
 
     async addUsbDevice() {

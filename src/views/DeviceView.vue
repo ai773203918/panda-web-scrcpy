@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, shallowRef, watch } from "vue";
 import { useDisplay } from "vuetify";
 import PairedDevices from "../components/Device/PairedDevices.vue";
-import logo from "../assets/android-chrome-192x192.png";
+import logo from "../assets/logo.svg";
 import DeviceShell from "../components/Device/DeviceShell.vue";
 import DeviceLogcat from "../components/Device/DeviceLogcat.vue";
 import DeviceInfo from "../components/Device/DeviceInfo.vue";
@@ -11,20 +11,33 @@ import VideoContainer from "../components/Device/VideoContainer.vue";
 import NavigationBar from "../components/Device/NavigationBar.vue";
 import state from "../components/Scrcpy/scrcpy-state";
 import AppManager from "../components/Device/AppManager.vue";
-import DeviceSelectDrawer from '../components/Device/DeviceSelectDrawer.vue'
-import GitHubStats from '../components/Common/GitHubStats.vue'
 import ShareButton from '../components/Remote/ShareButton.vue'
 
 const { width } = useDisplay();
-const showRightPanel = computed(() => width.value >= 960);
+/** 宽屏下是否具备显示右侧栏的条件 */
+const canShowRightPanel = computed(() => width.value >= 960);
+/** 用户手动收起右侧工具栏 */
+const rightPanelCollapsed = ref(false);
+/** 实际是否显示右侧栏与分隔条 */
+const layoutShowsRightPanel = computed(
+  () => canShowRightPanel.value && !rightPanelCollapsed.value
+);
 
 const containerSize = ref({ width: 0, height: 0 });
 const userSetLeftPanelWidth = ref(560);
 const leftPanelWidth = computed(() => {
-  if (!showRightPanel.value) {
-    return width.value;
+  if (!layoutShowsRightPanel.value) {
+    return containerSize.value.width > 0 ? containerSize.value.width : width.value;
   }
   return userSetLeftPanelWidth.value;
+});
+
+/** 小屏/单栏时用 100% 宽度，避免列布局下内联 px 与 flex 高度链断裂导致投屏区高度为 0 */
+const leftPanelOuterStyle = computed(() => {
+  if (!layoutShowsRightPanel.value) {
+    return { width: "100%", boxSizing: "border-box" };
+  }
+  return { width: `${userSetLeftPanelWidth.value}px` };
 });
 
 const rightPanelWidth = computed(() =>
@@ -62,7 +75,7 @@ const handleConnectionStatus = async (status) => {
 };
 
 const startResize = (e) => {
-  if (!showRightPanel.value) return;
+  if (!layoutShowsRightPanel.value) return;
   isResizing.value = true;
   startX.value = e.clientX || e.touches[0].clientX;
   startWidth.value = userSetLeftPanelWidth.value;
@@ -94,36 +107,31 @@ const containerRef = ref(null);
 const DeviceContainerRef = ref(null);
 const videoWrapperRef = ref(null);
 
-// 计算容器的实际可用空间
 const containerDimensions = computed(() => {
-  const horizontalPadding = 20;
-  const verticalPadding = 30;
-  const navBarWidth = 80;
-  const borderWidth = 6; // 考虑边框宽度
+  /** 与 `.device-container` 中导航列宽 + gap 一致，无额外水平内边距 */
+  const navColumnWidth = 56;
+  const videoNavGap = 4;
+  const canvasBorderTotal = 6;
 
   return {
     width:
-      leftPanelWidth.value - (navBarWidth + horizontalPadding + borderWidth),
-    height: containerSize.value.height - (verticalPadding * 2 + borderWidth),
+      leftPanelWidth.value - (navColumnWidth + videoNavGap + canvasBorderTotal),
+    height: containerSize.value.height - canvasBorderTotal,
   };
 });
 
-// 监听容器尺寸变化
 watch(
   () => containerDimensions.value,
   (newDimensions) => {
     if (videoWrapperRef.value) {
-      // 更新视频包装器的尺寸
       videoWrapperRef.value.style.width = `${newDimensions.width}px`;
       videoWrapperRef.value.style.height = `${newDimensions.height}px`;
-      // 通知 state 更新视频容器
       state.updateVideoContainer();
     }
   },
   { immediate: true }
 );
 
-// 修改 updateContainerSize 方法
 const updateContainerSize = () => {
   if (containerRef.value) {
     const rect = containerRef.value.getBoundingClientRect();
@@ -131,11 +139,9 @@ const updateContainerSize = () => {
       width: rect.width,
       height: rect.height,
     };
-    // 强制设置视频包装器的初始尺寸
     if (videoWrapperRef.value) {
       videoWrapperRef.value.style.width = `${containerDimensions.value.width}px`;
       videoWrapperRef.value.style.height = `${containerDimensions.value.height}px`;
-      // 通知 state 更新视频容器
       if (state.running) {
         state.updateVideoContainer();
       }
@@ -143,7 +149,6 @@ const updateContainerSize = () => {
   }
 };
 
-// 添加一个方法来确保容器尺寸已准备好
 const ensureContainerSize = () => {
   return new Promise(resolve => {
     const checkSize = () => {
@@ -159,7 +164,6 @@ const ensureContainerSize = () => {
 };
 
 onMounted(async () => {
-  // 确保容器尺寸已准备好
   await ensureContainerSize();
   window.addEventListener('resize', updateContainerSize);
 });
@@ -187,279 +191,442 @@ watch(width, (newWidth, oldWidth) => {
 });
 
 const tabs = [
-  { title: "基础信息", icon: "mdi-android", component: DeviceInfo },
-  { title: "应用管理", icon: "mdi-android", component: AppManager },
+  { title: "基础信息", icon: "mdi-information-outline", component: DeviceInfo },
+  { title: "应用管理", icon: "mdi-package-variant-closed", component: AppManager },
   { title: "终端", icon: "mdi-console", component: DeviceShell },
-  { title: "Logcat", icon: "mdi-android", component: DeviceLogcat },
+  { title: "Logcat", icon: "mdi-text-box-search-outline", component: DeviceLogcat },
 ];
 
-const showDeviceDrawer = ref(false);
+const pairedDevicesRef = ref(null);
+
+const handleAddDevice = () => {
+  pairedDevicesRef.value?.handleAddDevice();
+};
 </script>
 
 <template>
-  <v-app>
-    <v-app-bar height="64" color="white" app>
-      <v-container class="d-flex align-center justify-center pa-0" fluid>
-          <v-img
-          :src="logo"
-          max-width="24"
-          max-height="24"
-          class="mr-1 ml-10"
-        />
+  <v-app-bar
+    flat
+    height="48"
+    color="surface"
+    class="top-bar"
+    app
+  >
+    <div class="bar-inner">
+      <v-img
+        :src="logo"
+        max-width="22"
+        max-height="22"
+        class="flex-shrink-0"
+      />
+      <span class="brand-name">PANDASCRCPY</span>
+      <div class="bar-devices">
         <PairedDevices
+          ref="pairedDevicesRef"
           @pair-device="onPairDevice"
           @update-connection-status="handleConnectionStatus"
         />
-        
-        <!-- 分享按钮 -->
-        <ShareButton v-if="connected" class="ml-2" />
-        
-        <v-spacer />
-
-        <div class="d-flex align-center">
-          <div class="d-flex align-center mx-2">
-            <v-btn
-              icon
-              class="mr-2"
-              href="https://pandatestgrid.github.io/panda-web-scrcpy/"
-              target="_blank"
-              title="GitHub"
-            >
-              <v-icon>mdi-github</v-icon>
-            </v-btn>
-            <GitHubStats />
-          </div>
-
-          <v-btn
-            variant="text"
-            class="text-none"
-            style="height: 64px"
-            href="https://www.pandatest.net/device"
-            target="_blank"
-          >
-            <v-icon start>mdi-rocket-launch</v-icon>
-            功能加强版
-          </v-btn>
-        </div>
-      </v-container>
-    </v-app-bar>
-
-    <v-main>
-      <div
-        ref="containerRef"
-        class="resizable-container"
-        :class="{ 'horizontal-layout': isHorizontalLayout }"
+      </div>
+      <ShareButton v-if="connected" class="ml-1 flex-shrink-0" />
+      <slot name="remote-button" />
+      <v-spacer />
+      <v-btn
+        v-if="canShowRightPanel"
+        icon
+        variant="text"
+        size="small"
+        color="secondary"
+        class="flex-shrink-0"
+        :title="rightPanelCollapsed ? '展开侧栏' : '收起侧栏'"
+        @click="rightPanelCollapsed = !rightPanelCollapsed"
       >
-        <div class="left-panel" :style="{ width: leftPanelWidth + 'px' }">
-          <v-card class="panel-content">
-            <v-card-text class="d-flex align-center justify-center">
+        <v-icon size="20">
+          {{ rightPanelCollapsed ? 'mdi-chevron-double-left' : 'mdi-chevron-double-right' }}
+        </v-icon>
+      </v-btn>
+      <v-btn
+        icon
+        variant="text"
+        size="small"
+        color="secondary"
+        href="https://github.com/pandatestgrid/panda-web-scrcpy"
+        target="_blank"
+        rel="noopener noreferrer"
+        title="源码仓库"
+      >
+        <v-icon size="20">mdi-github</v-icon>
+      </v-btn>
+      <a
+        class="cta-btn d-none d-sm-inline-flex"
+        href="https://www.pandatest.net/device"
+        target="_blank"
+        rel="noopener noreferrer"
+        title="AI 助手、虚拟屏幕、设备群控、脚本录制回放、性能检测等"
+      >
+        <v-icon size="14" class="mr-1">mdi-rocket-launch-outline</v-icon>
+        加强版 · 免费
+        <v-icon size="12" class="ml-1">mdi-arrow-top-right</v-icon>
+      </a>
+    </div>
+  </v-app-bar>
+
+  <v-main class="main-area">
+    <div
+      ref="containerRef"
+      class="layout"
+      :class="{ 'horizontal-layout': isHorizontalLayout }"
+    >
+      <div class="left-panel" :style="leftPanelOuterStyle">
+        <div class="panel-card">
+          <div class="panel-inner">
+            <div
+              v-if="connected"
+              ref="DeviceContainerRef"
+              class="device-container"
+            >
               <div
-                v-if="connected"
-                ref="DeviceContainerRef"
-                class="device-container"
+                ref="videoWrapperRef"
+                class="video-wrapper"
+                :style="{
+                  width: `${containerDimensions.width}px`,
+                  height: `${containerDimensions.height}px`
+                }"
               >
-                <div
-                  ref="videoWrapperRef"
-                  class="video-wrapper"
-                  :style="{
-                    width: `${containerDimensions.width}px`,
-                    height: `${containerDimensions.height}px`
-                  }"
-                >
-                  <VideoContainer />
-                </div>
-                <div class="navigation-wrapper">
-                  <NavigationBar />
-                </div>
+                <VideoContainer />
               </div>
-              <div v-else class="d-flex align-center justify-center">
-                <div
-                  class="loading-indicator"
-                  :style="{
-                    width: leftPanelWidth / 1.2 + 'px',
-                    height: containerSize.height / 1.2 + 'px',
-                  }"
-                >
-                  <div class="connection-status">
-                    <v-progress-circular
-                      v-if="state.connecting"
-                      indeterminate
-                      color="primary"
-                      size="60"
-                      width="4"
-                    />
-                    <v-btn
-                      v-else
-                      icon
-                      x-large
-                      size="60"
-                      color="black"
-                      class="power-button mb-2"
-                      @click="showDeviceDrawer = true"
-                    >
-                      <v-icon x-large>mdi-power</v-icon>
-                    </v-btn>
-                  </div>
-                  <div class="text-h6">
-                    {{ state.connecting ? '正在连接设备...' : '连接设备' }}
-                  </div>
-                  <div class="text-body-2">
-                    {{ state.connecting ? '请稍候...' : '请确保设备已开启USB调试模式' }}
-                  </div>
-                </div>
+              <div class="navigation-wrapper">
+                <NavigationBar />
               </div>
-            </v-card-text>
-          </v-card>
-        </div>
-        <div
-          v-if="showRightPanel"
-          class="resizer"
-          @mousedown="startResize"
-          @touchstart="startResize"
-        />
-        <div
-          v-if="showRightPanel"
-          class="right-panel"
-          :style="{ width: rightPanelWidth + 'px' }"
-        >
-          <v-card height="100%">
-            <template v-if="connected">
-              <v-tabs v-model="tab" color="primary" align-tabs="center" grow>
-                <v-tab
-                  v-for="(item, index) in tabs"
-                  :key="index"
-                  :value="index"
-                >
-                  <v-icon start>{{ item.icon }}</v-icon>
-                  {{ item.title }}
-                </v-tab>
-              </v-tabs>
-              <v-window v-model="tab" class="right-panel-content">
-                <v-window-item
-                  v-for="(item, index) in tabs"
-                  :key="index"
-                  :value="index"
-                >
-                  <v-card flat>
-                    <component :is="item.component" :device-meta="deviceMeta" />
-                  </v-card>
-                </v-window-item>
-              </v-window>
-            </template>
-            <template v-else>
-              <AbstractList />
-            </template>
-          </v-card>
+            </div>
+            <div v-else class="empty-state-wrap">
+              <div class="empty-state">
+                <div class="empty-state-icon">
+                  <v-progress-circular
+                    v-if="state.connecting"
+                    indeterminate
+                    color="primary"
+                    size="48"
+                    width="3"
+                  />
+                  <v-btn
+                    v-else
+                    icon
+                    size="56"
+                    color="primary"
+                    class="power-btn"
+                    @click="handleAddDevice"
+                  >
+                    <v-icon size="28">mdi-power</v-icon>
+                  </v-btn>
+                </div>
+                <p class="empty-state-title">
+                  {{ state.connecting ? '正在连接...' : '连接设备' }}
+                </p>
+                <p class="empty-state-desc">
+                  {{ state.connecting ? '请稍候' : '确保设备已开启 USB 调试模式' }}
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-    </v-main>
+      <div
+        v-if="layoutShowsRightPanel"
+        class="resizer"
+        @mousedown="startResize"
+        @touchstart="startResize"
+      />
+      <div
+        v-if="layoutShowsRightPanel"
+        class="right-panel"
+        :style="{ width: rightPanelWidth + 'px' }"
+      >
+        <div class="panel-card right-card">
+          <template v-if="connected">
+            <div class="tab-bar">
+              <button
+                v-for="(item, index) in tabs"
+                :key="index"
+                :class="['tab-item', { active: tab === index }]"
+                @click="tab = index"
+              >
+                <v-icon size="14">{{ item.icon }}</v-icon>
+                <span>{{ item.title }}</span>
+              </button>
+            </div>
+            <v-window v-model="tab" class="tab-content">
+              <v-window-item
+                v-for="(item, index) in tabs"
+                :key="index"
+                :value="index"
+              >
+                <component :is="item.component" :device-meta="deviceMeta" />
+              </v-window-item>
+            </v-window>
+          </template>
+          <template v-else>
+            <AbstractList />
+          </template>
+        </div>
+      </div>
+    </div>
+  </v-main>
 
-    <DeviceSelectDrawer v-model="showDeviceDrawer" />
-  </v-app>
 </template>
 
 <style lang="scss" scoped>
-.loading-indicator {
+.top-bar {
+  border-bottom: 1px solid var(--border) !important;
+}
+
+.bar-inner {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  background: linear-gradient(#e9ecf1, #deeefa);
-  border-radius: 16px;
-  border: 3px solid black;
-  padding: 16px;
-  text-align: center;
-  font-size: 16px;
-  font-weight: 500;
+  flex-grow: 1;
+  gap: 8px;
+  padding: 0 12px;
+  max-width: 100%;
+}
 
-  .connection-status {
-    margin-bottom: 16px;
-    min-height: 60px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
+.brand-name {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: rgba(24, 24, 27, 0.85);
+  white-space: nowrap;
+  user-select: none;
+}
 
-  .text-h6 {
-    margin-bottom: 8px;
-    transition: all 0.3s ease;
-  }
+.bar-devices {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 
-  .text-body-2 {
-    color: rgba(0, 0, 0, 0.6);
-    transition: all 0.3s ease;
+.cta-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--cta-bg);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  letter-spacing: 0.01em;
+  line-height: 1;
+
+  &:hover {
+    background: var(--cta-hover);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+    transform: translateY(-1px);
   }
 }
 
-.resizable-container {
+.main-area {
+  background: rgb(var(--v-theme-background));
+}
+
+.layout {
   display: flex;
-  height: calc(100vh - 64px);
+  height: calc(100vh - 48px);
   overflow: hidden;
 
   &.horizontal-layout {
     flex-direction: row;
   }
+}
 
-  .left-panel {
-    min-width: 200px;
-    max-width: 100%;
-    overflow: hidden;
-    margin: 16px;
+.left-panel {
+  min-width: 200px;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
 
-    .panel-content {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
-      padding: 16px;
-    }
+.right-panel {
+  flex: 1 1 0;
+  min-width: 300px;
+  min-height: 0;
+  padding: 0 4px 6px 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-card {
+  background: rgb(var(--v-theme-surface));
+  border: 1px solid var(--border);
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.panel-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.right-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tab-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+  background: rgb(var(--v-theme-surface));
+  height: 36px;
+}
+
+.tab-item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  border: none;
+  background: none;
+  cursor: pointer;
+  position: relative;
+  transition: color 0.15s ease;
+  white-space: nowrap;
+
+  &:hover {
+    color: rgba(24, 24, 27, 0.85);
+    background: rgba(24, 24, 27, 0.03);
   }
 
-  .right-panel {
-    flex-grow: 1;
-    min-width: 300px;
-    margin: 16px 16px 16px 8px;
+  &.active {
+    color: rgb(var(--v-theme-primary));
+
+    &::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 16px;
+      right: 16px;
+      height: 2px;
+      background: rgb(var(--v-theme-primary));
+      
+    }
+  }
+}
+
+.tab-content {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+
+  :deep(.v-window__container) {
+    position: absolute !important;
+    inset: 0;
+  }
+
+  :deep(.v-window-item) {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
+    padding: 0;
+    margin: 0;
   }
 
-  .right-panel-content {
-    flex-grow: 1;
-    overflow-y: auto;
-    padding: 16px;
-  }
-
-  .resizer {
-    width: 8px;
-    background-color: #e0e0e0;
-    cursor: col-resize;
-    transition: background-color 0.3s ease;
-
-    &:hover {
-      background-color: #bdbdbd;
-    }
+  :deep(.v-window-item > *) {
+    flex: 1 1 0;
+    min-height: 0;
+    min-width: 0;
   }
 }
 
-.v-window-item {
+.resizer {
+  flex-shrink: 0;
+  align-self: stretch;
+  width: 6px;
+  margin: 10px 0;
+  box-sizing: border-box;
+  cursor: col-resize;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  user-select: none;
+  touch-action: none;
+
+  &::before {
+    content: '';
+    width: 1px;
+    flex-shrink: 0;
+    background-color: var(--border-hover);
+    transition: width 0.12s ease, background-color 0.12s ease;
+  }
+
+  &:hover::before,
+  &:active::before {
+    width: 2px;
+    background-color: rgba(24, 24, 27, 0.22);
+  }
+}
+
+.empty-state-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
   height: 100%;
-  overflow-y: auto;
 }
 
-@media (max-width: 959px) {
-  .resizable-container {
-    flex-direction: column;
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgb(var(--v-theme-background));
+  text-align: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+}
 
-    .left-panel {
-      max-width: 100%;
-      margin: 16px;
-    }
+.empty-state-icon {
+  margin-bottom: 8px;
+}
 
-    .resizer {
-      display: none;
-    }
+.power-btn {
+  transition: box-shadow 0.2s ease;
+
+  &:hover {
+    box-shadow: 0 4px 16px rgba(24, 24, 27, 0.12);
   }
+}
+
+.empty-state-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: rgba(24, 24, 27, 0.85);
+  margin: 0;
+}
+
+.empty-state-desc {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0;
+  max-width: 260px;
 }
 
 .device-container {
@@ -467,8 +634,8 @@ const showDeviceDrawer = ref(false);
   flex-direction: row;
   width: 100%;
   height: 100%;
-  padding: 30px 10px;
-  gap: 16px;
+  padding: 0;
+  gap: 4px;
   box-sizing: border-box;
   background: transparent;
 }
@@ -480,37 +647,41 @@ const showDeviceDrawer = ref(false);
   justify-content: center;
   align-items: center;
   background: transparent;
-  border-radius: 16px;
   overflow: visible;
   box-sizing: border-box;
   transition: none !important;
 }
 
 .navigation-wrapper {
-  width: 64px;
+  width: 56px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 8px 0;
+  padding: 0;
   background: transparent;
 }
 
-.device-container.hidden {
-  display: none;
-}
+@media (max-width: 959px) {
+  .layout {
+    flex-direction: column;
+    min-height: 0;
+  }
 
-.device-drawer {
-  max-height: 80vh;
-  border-radius: 0 0 16px 16px;
+  .left-panel {
+    flex: 1 1 0;
+    min-height: 0;
+    max-width: 100%;
+    padding: 0;
+  }
 
-  :deep(.v-navigation-drawer__content) {
-    border-radius: 0 0 16px 16px;
-    overflow: hidden;
+  .right-panel {
+    padding: 0 6px 10px;
+  }
+
+  .resizer {
+    display: none;
   }
 }
 
-.discord-icon {
-  width: 24px;
-  height: 24px;
-}
 </style>

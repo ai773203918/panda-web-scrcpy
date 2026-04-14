@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, provide, computed } from 'vue';
+import { ref, onMounted, onUnmounted, provide, nextTick } from 'vue';
 import {
     AndroidMotionEventAction,
     AndroidMotionEventButton,
@@ -14,6 +14,11 @@ const videoWrapper = ref<HTMLDivElement | null>(null);
 const isVideoContainerFocused = ref(false);
 const isCanvasReady = ref(false);
 const isFullyRendered = ref(false);
+/** 视频流已就绪（有尺寸且 running），用于占位/铺满切换与淡入 */
+const pictureReady = ref(false);
+const videoFadedIn = ref(false);
+const placeholderAspect = ref('9 / 16');
+let layoutFadeRaf = 0;
 
 const MOUSE_EVENT_BUTTON_TO_ANDROID_BUTTON = [
     AndroidMotionEventButton.Primary,
@@ -23,10 +28,21 @@ const MOUSE_EVENT_BUTTON_TO_ANDROID_BUTTON = [
     AndroidMotionEventButton.Forward,
 ];
 
+const activePointers = new Set<number>();
+
+/** 键盘/滚轮等需要焦点，避免误触 */
 const isReady = () => (
     !!state.scrcpy &&
     !!state.canvas &&
     isVideoContainerFocused.value &&
+    isCanvasReady.value &&
+    isFullyRendered.value
+);
+
+/** 触摸轨迹：不要求焦点，避免移出画布后因 blur/失焦导致收不到 up 而卡在按下状态 */
+const touchPipelineReady = () => (
+    !!state.scrcpy &&
+    !!state.canvas &&
     isCanvasReady.value &&
     isFullyRendered.value
 );
@@ -43,9 +59,7 @@ const isPointInCanvas = (clientX: number, clientY: number): boolean => {
 };
 
 const handleWheel = (e: WheelEvent) => {
-    if (!isReady() || !isPointInCanvas(e.clientX, e.clientY)) {
-        return;
-    }
+    if (!isReady() || !isPointInCanvas(e.clientX, e.clientY)) return;
     videoContainer.value?.focus();
     e.preventDefault();
     e.stopPropagation();
@@ -63,9 +77,7 @@ const handleWheel = (e: WheelEvent) => {
 };
 
 const injectTouch = (action: AndroidMotionEventAction, e: PointerEvent) => {
-    if (!isReady() || !isPointInCanvas(e.clientX, e.clientY)) {
-        return;
-    }
+    if (!touchPipelineReady()) return;
 
     const { pointerType } = e;
     const pointerId: bigint =
@@ -73,7 +85,7 @@ const injectTouch = (action: AndroidMotionEventAction, e: PointerEvent) => {
 
     const { x, y } = state.clientPositionToDevicePosition(e.clientX, e.clientY);
 
-    const message = {
+    state.scrcpy?.controller?.injectTouch({
         action,
         pointerId,
         videoWidth: state.width!,
@@ -83,46 +95,81 @@ const injectTouch = (action: AndroidMotionEventAction, e: PointerEvent) => {
         pressure: e.pressure,
         actionButton: MOUSE_EVENT_BUTTON_TO_ANDROID_BUTTON[e.button],
         buttons: e.buttons,
-    };
-    state.scrcpy?.controller?.injectTouch(message)
+    });
 };
 
 const handlePointerDown = (e: PointerEvent) => {
-    if (!isReady() || !isPointInCanvas(e.clientX, e.clientY)) return;
+    if (!touchPipelineReady() || !isPointInCanvas(e.clientX, e.clientY)) return;
 
+    isVideoContainerFocused.value = true;
     state.fullScreenContainer?.focus();
     e.preventDefault();
     e.stopPropagation();
 
     (e.currentTarget as HTMLDivElement)?.setPointerCapture(e.pointerId);
+    activePointers.add(e.pointerId);
     injectTouch(AndroidMotionEventAction.Down, e);
 };
 
 const handlePointerMove = (e: PointerEvent) => {
-    if (!isReady() || !isPointInCanvas(e.clientX, e.clientY)) return;
+    const isDragging = activePointers.has(e.pointerId);
+    if (isDragging) {
+        if (!touchPipelineReady()) return;
+    } else {
+        if (!isReady() || !isPointInCanvas(e.clientX, e.clientY)) return;
+    }
 
     e.preventDefault();
     e.stopPropagation();
-    injectTouch(
-        e.buttons === 0 ? AndroidMotionEventAction.HoverMove : AndroidMotionEventAction.Move,
-        e
-    );
+
+    const action = isDragging && e.buttons !== 0
+        ? AndroidMotionEventAction.Move
+        : AndroidMotionEventAction.HoverMove;
+
+    injectTouch(action, e);
 };
 
 const handlePointerUp = (e: PointerEvent) => {
-    if (!isReady() || !isPointInCanvas(e.clientX, e.clientY)) return;
+    if (!touchPipelineReady()) return;
+
+    const wasDragging = activePointers.has(e.pointerId);
+    if (!wasDragging && !isPointInCanvas(e.clientX, e.clientY)) return;
 
     e.preventDefault();
     e.stopPropagation();
+
+    activePointers.delete(e.pointerId);
+
+    try {
+        (e.currentTarget as HTMLDivElement)?.releasePointerCapture(e.pointerId);
+    } catch {
+        // pointer capture may already be released
+    }
+
     injectTouch(AndroidMotionEventAction.Up, e);
 };
 
 const handlePointerLeave = (e: PointerEvent) => {
-    if (!isReady() || !isPointInCanvas(e.clientX, e.clientY)) return;
+    if (!touchPipelineReady()) return;
+    if (activePointers.has(e.pointerId)) return;
 
-    e.preventDefault();
-    e.stopPropagation();
     injectTouch(AndroidMotionEventAction.HoverExit, e);
+};
+
+const handlePointerCancel = (e: PointerEvent) => {
+    if (!touchPipelineReady()) return;
+
+    if (activePointers.has(e.pointerId)) {
+        activePointers.delete(e.pointerId);
+        injectTouch(AndroidMotionEventAction.Up, e);
+    }
+};
+
+/** 浏览器意外释放 capture 时补发 Up，防止设备端一直按住 */
+const handleLostPointerCapture = (e: PointerEvent) => {
+    if (!touchPipelineReady()) return;
+    if (!activePointers.has(e.pointerId)) return;
+    activePointers.delete(e.pointerId);
     injectTouch(AndroidMotionEventAction.Up, e);
 };
 
@@ -131,9 +178,7 @@ const handleContextMenu = (e: MouseEvent) => {
     e.preventDefault();
 };
 
-// 辅助函数：处理可能的 BigInt 转换问题
 const sanitizeText = (text: string): string => {
-    // 移除可能导致 BigInt 转换问题的内容
     return text.replace(/[nN]$/g, '');
 };
 
@@ -144,13 +189,12 @@ const handlePaste = async () => {
         const sanitizedText = sanitizeText(clipboardText);
 
         const clipboardMessage: Omit<ScrcpySetClipboardControlMessage, 'type'> = {
-            sequence: BigInt(0), // 使用 BigInt(0) 作为序列号
-            paste: true, // 设置为 true，因为这是粘贴操作
-            content: sanitizedText, // 使用 content 替代 text
+            sequence: BigInt(0),
+            paste: true,
+            content: sanitizedText,
         };
 
         await state.scrcpy.controller.setClipboard(clipboardMessage);
-        console.log('已粘贴到设备:', sanitizedText);
     } catch (error) {
         console.error('粘贴到设备失败:', error);
     }
@@ -178,19 +222,48 @@ const handleFocus = () => {
 };
 
 const handleBlur = () => {
+    if (activePointers.size > 0) return;
     isVideoContainerFocused.value = false;
 };
 
 const checkRendering = () => {
     if (state.running) {
         isFullyRendered.value = true;
+    }
+    if (state.running && pictureReady.value && renderingCheckInterval !== undefined) {
         clearInterval(renderingCheckInterval);
+        renderingCheckInterval = undefined;
     }
 };
 
-let renderingCheckInterval: number;
+const syncPictureLayout = () => {
+    if (state.width > 0 && state.height > 0) {
+        placeholderAspect.value = `${state.width} / ${state.height}`;
+    }
+    const ready = !!(state.running && state.width > 0 && state.height > 0);
+    if (ready) {
+        if (!pictureReady.value) {
+            pictureReady.value = true;
+            nextTick(() => {
+                state.updateVideoContainer();
+                cancelAnimationFrame(layoutFadeRaf);
+                layoutFadeRaf = requestAnimationFrame(() => {
+                    state.updateVideoContainer();
+                    layoutFadeRaf = requestAnimationFrame(() => {
+                        videoFadedIn.value = true;
+                    });
+                });
+            });
+        }
+    } else {
+        pictureReady.value = false;
+        videoFadedIn.value = false;
+        placeholderAspect.value = '9 / 16';
+    }
+};
 
-// 添加鼠标进入事件处理
+let renderingCheckInterval: ReturnType<typeof setInterval> | undefined;
+
 const handleMouseEnter = () => {
     if (videoContainer.value) {
         videoContainer.value.focus();
@@ -198,8 +271,8 @@ const handleMouseEnter = () => {
     }
 };
 
-// 添加鼠标离开事件处理
 const handleMouseLeave = () => {
+    if (activePointers.size > 0) return;
     isVideoContainerFocused.value = false;
 };
 
@@ -208,20 +281,24 @@ onMounted(() => {
         videoContainer.value.addEventListener('wheel', handleWheel, { passive: false });
         videoContainer.value.addEventListener('focus', handleFocus);
         videoContainer.value.addEventListener('blur', handleBlur);
-        // 添加鼠标进入离开事件监听
         videoContainer.value.addEventListener('mouseenter', handleMouseEnter);
         videoContainer.value.addEventListener('mouseleave', handleMouseLeave);
     }
     if (client.device && videoContainer.value) {
         state.setRendererContainer(videoContainer.value);
-        state.start(client.device as any).then(() => {
+        void (async () => {
+            await client.killScrcpyServerOnDevice();
+            await new Promise<void>((r) => setTimeout(r, 200));
+            const scrcpy = await state.start(client.device as any);
+            if (!scrcpy) {
+                return;
+            }
             isCanvasReady.value = true;
-            // 开始检查渲染状态
-            renderingCheckInterval = setInterval(checkRendering, 100);
-        });
-    }
-    if ('keyboard' in navigator) {
-        // navigator.keyboard.lock();
+            renderingCheckInterval = window.setInterval(() => {
+                syncPictureLayout();
+                checkRendering();
+            }, 100);
+        })();
     }
 
     window.addEventListener('keydown', handleKeyEvent);
@@ -233,19 +310,18 @@ onUnmounted(() => {
         videoContainer.value.removeEventListener('wheel', handleWheel);
         videoContainer.value.removeEventListener('focus', handleFocus);
         videoContainer.value.removeEventListener('blur', handleBlur);
-        // 移除鼠标进入离开事件监听
         videoContainer.value.removeEventListener('mouseenter', handleMouseEnter);
         videoContainer.value.removeEventListener('mouseleave', handleMouseLeave);
     }
-    if ('keyboard' in navigator) {
-        // navigator.keyboard.unlock();
-    }
     window.removeEventListener('keydown', handleKeyEvent);
     window.removeEventListener('keyup', handleKeyEvent);
-    clearInterval(renderingCheckInterval);
+    if (renderingCheckInterval !== undefined) {
+        clearInterval(renderingCheckInterval);
+    }
+    cancelAnimationFrame(layoutFadeRaf);
+    activePointers.clear();
 });
 
-// 提供一个方法来设置焦点状态，供父组件使用
 provide('setVideoContainerFocus', (focused: boolean) => {
     isVideoContainerFocused.value = focused;
 });
@@ -256,16 +332,19 @@ provide('setVideoContainerFocus', (focused: boolean) => {
         <div
             ref="videoContainer"
             class="video-container"
+            :class="{
+                'video-container--placeholder': !pictureReady,
+                'video-container--fade-in': videoFadedIn,
+            }"
+            :style="!pictureReady ? { aspectRatio: placeholderAspect } : undefined"
             tabindex="0"
             @pointerdown="handlePointerDown"
             @pointermove="handlePointerMove"
             @pointerup="handlePointerUp"
-            @pointercancel="handlePointerUp"
+            @pointercancel="handlePointerCancel"
             @pointerleave="handlePointerLeave"
+            @lostpointercapture="handleLostPointerCapture"
             @contextmenu="handleContextMenu"
-            @wheel="handleWheel"
-            @mouseenter="handleMouseEnter"
-            @mouseleave="handleMouseLeave"
         />
     </div>
 </template>
@@ -275,32 +354,38 @@ provide('setVideoContainerFocus', (focused: boolean) => {
     position: relative;
     width: 100%;
     height: 100%;
+    min-height: 0;
     display: flex;
     justify-content: center;
     align-items: center;
     background: transparent;
 }
 
-.loading-indicator {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    font-size: 18px;
-    color: #303133;
-}
-
 .video-container {
     position: relative;
     width: 100%;
     height: 100%;
-    background-color: transparent;
+    min-height: 0;
+    background-color: rgba(24, 24, 27, 0.04);
     cursor: crosshair;
     overflow: hidden;
     outline: none;
+    touch-action: none;
+    transition: background-color 0.35s ease;
 }
 
-/* 确保 canvas 元素正确显示并添加边框 */
+.video-container--placeholder {
+    width: auto;
+    height: 100%;
+    max-height: 100%;
+    max-width: 100%;
+    flex-shrink: 0;
+}
+
+.video-container--fade-in {
+    background-color: transparent;
+}
+
 .video-container :deep(canvas) {
     display: block;
     position: absolute;
@@ -317,5 +402,11 @@ provide('setVideoContainerFocus', (focused: boolean) => {
     box-sizing: border-box;
     padding: 0;
     margin: 0;
+    opacity: 0;
+    transition: opacity 0.45s ease;
+}
+
+.video-container--fade-in :deep(canvas) {
+    opacity: 1;
 }
 </style>

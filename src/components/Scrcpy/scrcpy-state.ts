@@ -1,6 +1,6 @@
 // 导入外部依赖
 import { AdbDaemonWebUsbDevice } from '@yume-chan/adb-daemon-webusb';
-import { AdbScrcpyClient, AdbScrcpyOptionsLatest, AdbScrcpyOptions3_3_3 } from '@yume-chan/adb-scrcpy';
+import { AdbScrcpyClient, AdbScrcpyOptions3_3_3 } from '@yume-chan/adb-scrcpy';
 // import { VERSION, BIN } from '@yume-chan/fetch-scrcpy-server';
 import { PcmPlayer } from '@yume-chan/pcm-player';
 import {
@@ -22,7 +22,6 @@ import {
     WebCodecsVideoDecoder,
     WebGLVideoFrameRenderer,
     BitmapVideoFrameRenderer,
-    InsertableStreamVideoFrameRenderer,
 } from "@yume-chan/scrcpy-decoder-webcodecs";
 
 // 导入本地依赖

@@ -3,36 +3,42 @@
     <div class="info-container">
       <v-fade-transition mode="out-in">
         <div class="app-grid">
-          <!-- 应用列表部分 -->
+          <!-- 安装应用（在列表上方） -->
+          <div class="app-install">
+            <v-card class="d-flex flex-column">
+              <v-card-title class="py-2 px-4 text-subtitle-1 font-weight-semibold bg-primary-lighten-5">
+                安装应用
+              </v-card-title>
+              <v-card-text class="pt-3 pb-3">
+                <DeviceInstall @install-complete="handleInstallComplete" />
+              </v-card-text>
+            </v-card>
+          </div>
+
+          <!-- 应用列表 -->
           <div class="app-list">
-            <v-card class="d-flex flex-column h-100">
-              <v-card-title class="py-3 px-4 bg-primary-lighten-5 d-flex justify-space-between align-center">
-                <div class="d-flex align-center">
-                  <v-icon start color="primary" class="mr-2">mdi-format-list-bulleted</v-icon>
-                  <span class="text-h6">应用列表</span>
-                </div>
-                <div class="d-flex gap-2">
-                  <v-btn 
-                    color="primary"
-                    variant="tonal" 
-                    @click="refreshAppList"
-                    :loading="loading"
-                    prepend-icon="mdi-refresh"
-                  >
-                    刷新
-                  </v-btn>
-                </div>
+            <v-card class="d-flex flex-column app-list-card">
+              <v-card-title class="py-2 px-4 bg-primary-lighten-5 d-flex justify-space-between align-center">
+                <span class="text-subtitle-1 font-weight-semibold">应用列表</span>
+                <v-btn
+                  color="primary"
+                  variant="tonal"
+                  size="small"
+                  @click="refreshAppList"
+                  :loading="loading"
+                >
+                  刷新
+                </v-btn>
               </v-card-title>
 
               <div class="px-4 py-2">
                 <v-text-field
                   v-model="search"
                   label="搜索应用"
-                  prepend-icon="mdi-magnify"
                   variant="outlined"
                   density="compact"
                   hide-details
-                ></v-text-field>
+                />
               </div>
 
               <v-card-text class="flex-grow-1 pa-0 overflow-auto">
@@ -41,41 +47,28 @@
                   :items="apps"
                   :loading="loading"
                   :search="search"
-                  :items-per-page="10"
+                  :items-per-page="-1"
+                  hide-default-footer
                   hover
                   fixed-header
                   class="app-table"
                 >
-                  <!-- 应用信息列 -->
-                  <template v-slot:item.appInfo="{ item }">
-                    <div class="d-flex align-center">
-                      <v-icon size="32" color="grey" class="mr-3">mdi-android</v-icon>
-                      <div>
-                        <div class="font-weight-medium">{{ item.appName }}</div>
-                        <div class="text-caption text-grey">{{ item.packageName }}</div>
-                      </div>
-                    </div>
+                  <template v-slot:[slotItemAppName]="{ item }">
+                    <span class="font-weight-medium">{{ item.appName }}</span>
+                  </template>
+                  <template v-slot:[slotItemPackageName]="{ item }">
+                    <span class="text-body-2 text-medium-emphasis package-cell">{{ item.packageName }}</span>
                   </template>
 
                   <!-- 版本号列 -->
-                  <template v-slot:item.versionInfo="{ item }">
+                  <template v-slot:[slotItemVersionInfo]="{ item }">
                     <div>
                       <div class="font-weight-medium">版本号: {{ item.versionCode || '未知' }}</div>
                     </div>
                   </template>
 
-                  <!-- 安装信息列 -->
-                  <template v-slot:item.installInfo="{ item }">
-                    <div>
-                      <div class="text-caption">来源: {{ item.installer }}</div>
-                      <div class="text-caption text-grey text-truncate" :title="item.sourceDir">
-                        路径: {{ item.sourceDir }}
-                      </div>
-                    </div>
-                  </template>
-
                   <!-- 操作列 -->
-                  <template v-slot:item.actions="{ item }">
+                  <template v-slot:[slotItemActions]="{ item }">
                     <div class="d-flex gap-2 actions-container">
                       <v-btn
                         color="primary"
@@ -109,19 +102,6 @@
                     </div>
                   </template>
                 </v-data-table>
-              </v-card-text>
-            </v-card>
-          </div>
-
-          <!-- 安装应用部分 -->
-          <div class="app-install">
-            <v-card class="h-100">
-              <v-card-title class="py-3 px-4 bg-primary-lighten-5">
-                <v-icon start color="primary" class="mr-2">mdi-package-variant</v-icon>
-                安装应用
-              </v-card-title>
-              <v-card-text class="overflow-auto">
-                <DeviceInstall @install-complete="handleInstallComplete" />
               </v-card-text>
             </v-card>
           </div>
@@ -217,23 +197,27 @@ const exportProgress = ref(0);
 const showInstallDialog = ref(false);
 const exportingApp = ref<ExtendedPackageInfo | null>(null);
 
+/** v-data-table 插槽名（动态绑定，避免 item.xxx 被当成 v-slot modifier） */
+const slotItemAppName = 'item.appName';
+const slotItemPackageName = 'item.packageName';
+const slotItemVersionInfo = 'item.versionInfo';
+const slotItemActions = 'item.actions';
+
 const refreshAppList = async () => {
   if (!client.device || !packageManager.value) return;
 
   loading.value = true;
   try {
-    const pm = packageManager.value;
     const appList: ExtendedPackageInfo[] = [];
     
     // 使用 spawnAndWaitLegacy 方法执行命令
     const output = await client.device.subprocess.noneProtocol!.spawnWaitText([
-      'pm', 
-      'list', 
-      'packages', 
+      'pm',
+      'list',
+      'packages',
       '-f', // showSourceDir
       '-i', // showInstaller
       '--show-versioncode', // showVersionCode
-      '-3'  // listThirdParty
     ]);
 
     // 处理输出结果
@@ -369,6 +353,7 @@ const exportApk = async (app: ExtendedPackageInfo) => {
       const totalSize = Number(stat.size);
       let receivedLength = 0;
       
+      // eslint-disable-next-line no-constant-condition -- ReadableStreamDefaultReader until done
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -423,12 +408,19 @@ onMounted(() => {
 });
 
 const headers = [
-  { 
-    title: '应用信息',
-    key: 'appInfo',
+  {
+    title: '应用名称',
+    key: 'appName',
     align: 'start' as const,
-    sortable: false,
-    width: '300'
+    sortable: true,
+    width: '140',
+  },
+  {
+    title: '包名',
+    key: 'packageName',
+    align: 'start' as const,
+    sortable: true,
+    minWidth: '200',
   },
   {
     title: '版本信息',
@@ -436,13 +428,6 @@ const headers = [
     align: 'start' as const,
     sortable: true,
     width: '150'
-  },
-  {
-    title: '安装信息',
-    key: 'installInfo',
-    align: 'start' as const,
-    sortable: false,
-    width: '300'
   },
   {
     title: '操作',
@@ -458,9 +443,8 @@ const headers = [
 <style scoped>
 .app-manager {
   height: 100%;
-  padding: 16px;
+  padding: 12px;
   overflow: hidden;
-  max-height: calc(100vh - 64px); /* 减去顶部导航栏的高度 */
 }
 
 .info-container {
@@ -470,18 +454,30 @@ const headers = [
 
 .app-grid {
   height: 100%;
+  min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-  gap: 24px;
-  max-height: 100%;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto 1fr;
+  gap: 12px;
 }
 
-.app-list, .app-install {
-  height: 100%;
+.app-install {
   min-width: 0;
+  flex-shrink: 0;
+}
+
+.app-list {
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  max-height: 100%;
+  overflow: hidden;
+}
+
+.app-list-card {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* 表格容器样式 */
@@ -490,7 +486,7 @@ const headers = [
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - 200px); /* 调整最大高度 */
+  min-height: 0;
 }
 
 /* 表格样式 */
@@ -508,6 +504,15 @@ const headers = [
 :deep(.v-data-table__wrapper) {
   flex: 1;
   overflow-y: auto !important;
+}
+
+.package-cell {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 
 /* 固定操作列样式 */

@@ -33,7 +33,6 @@ const isExpandNotificationPanel = ref(false);
 const isRecording = ref(false);
 const recordingTime = ref('00:00:00');
 
-// 录制状态监听
 let unsubscribe = null;
 
 onMounted(() => {
@@ -49,39 +48,6 @@ onUnmounted(() => {
     }
 });
 
-const buttons = ref([
-    { icon: 'mdi-camera', label: '截图', onClick: () => takeScreenshot() },
-    {
-        icon: 'mdi-radiobox-marked',
-        label: computed(() => (isRecording.value ? `录制中 ${recordingTime.value}` : '录制')),
-        onClick: () => recording(),
-        isActive: computed(() => isRecording.value),
-    },
-    {
-        icon: computed(() => (isFullscreen.value ? 'mdi-fullscreen-exit' : 'mdi-fullscreen')),
-        label: '全屏',
-        onClick: () => toggleFullScreen(),
-    },
-    {
-        icon: computed(() => (isScreenOn.value ? 'mdi-eye-outline' : 'mdi-eye-closed')),
-        label: '隐私模式',
-        onClick: () => toggleScreen(),
-    },
-    { icon: 'mdi-screen-rotation', label: '旋转', size: '18', onClick: () => rotateDevice() },
-    {
-        icon: 'mdi-bell-cog-outline',
-        label: '通知栏',
-        onClick: () => notificationPanel(),
-    },
-    { icon: 'mdi-volume-plus', label: '音量 + ', onClick: () => volumeUp() },
-    { icon: 'mdi-volume-minus', label: '音量 -', onClick: () => volumeDown() },
-    {
-        icon: 'mdi-power-standby',
-        label: '电源',
-        onClick: () => client.device.power.powerButton(),
-    },
-]);
-
 async function takeScreenshot() {
     if (!state.decoder) {
         console.error('截图失败: 解码器不可用');
@@ -93,7 +59,6 @@ async function takeScreenshot() {
         const deviceName = client.deviceName?.replace(/[^a-zA-Z0-9-_]/g, '_') || 'device';
         const fileName = `screenshot_${deviceName}_${timestamp}.png`;
 
-        // 使用 decoder 的 snapshot 方法从视频流获取截图
         const blob = await state.decoder.snapshot();
         if (blob) {
             saveAs(blob, fileName);
@@ -115,8 +80,8 @@ function recording() {
                 console.error('Cannot start recording: video metadata is not set');
                 return;
             }
-            recorder.startRecording(); // 开始录制
-            state.scrcpy.controller.resetVideo(); // 重置视频流以开始录制
+            recorder.startRecording();
+            state.scrcpy.controller.resetVideo();
         }
     } catch (error) {
         console.error('录制操作失败:', error);
@@ -207,49 +172,31 @@ async function notificationPanel() {
 }
 
 function handlePointerDown(e) {
-    if (!state.scrcpy) {
-        return false;
-    }
-
-    if (e.button !== 0) {
-        return false;
-    }
-
+    if (!state.scrcpy) return false;
+    if (e.button !== 0) return false;
     state?.fullScreenContainer.focus();
     e.preventDefault();
     e.stopPropagation();
-
     return true;
 }
 
 function handlePointerUp(e) {
-    if (!state.scrcpy) {
-        return false;
-    }
+    if (!state.scrcpy) return false;
     return e.button === 0;
 }
 
 function handleBackPointerDown(e) {
-    if (!handlePointerDown(e)) {
-        return;
-    }
-
+    if (!handlePointerDown(e)) return;
     state.scrcpy.controller.backOrScreenOn(AndroidKeyEventAction.Down);
 }
 
 function handleBackPointerUp(e) {
-    if (!handlePointerUp(e)) {
-        return;
-    }
-
+    if (!handlePointerUp(e)) return;
     state.scrcpy.controller.backOrScreenOn(AndroidKeyEventAction.Up);
 }
 
 function handleHomePointerDown(e) {
-    if (!handlePointerDown(e)) {
-        return;
-    }
-
+    if (!handlePointerDown(e)) return;
     state.scrcpy?.controller?.injectKeyCode({
         action: AndroidKeyEventAction.Down,
         keyCode: AndroidKeyCode.AndroidHome,
@@ -259,10 +206,7 @@ function handleHomePointerDown(e) {
 }
 
 function handleHomePointerUp(e) {
-    if (!handlePointerUp(e)) {
-        return;
-    }
-
+    if (!handlePointerUp(e)) return;
     state.scrcpy?.controller?.injectKeyCode({
         action: AndroidKeyEventAction.Up,
         keyCode: AndroidKeyCode.AndroidHome,
@@ -272,10 +216,7 @@ function handleHomePointerUp(e) {
 }
 
 function handleAppSwitchPointerDown(e) {
-    if (!handlePointerDown(e)) {
-        return;
-    }
-
+    if (!handlePointerDown(e)) return;
     state.scrcpy?.controller?.injectKeyCode({
         action: AndroidKeyEventAction.Down,
         keyCode: AndroidKeyCode.AndroidAppSwitch,
@@ -285,10 +226,7 @@ function handleAppSwitchPointerDown(e) {
 }
 
 function handleAppSwitchPointerUp(e) {
-    if (!handlePointerUp(e)) {
-        return;
-    }
-
+    if (!handlePointerUp(e)) return;
     state.scrcpy?.controller?.injectKeyCode({
         action: AndroidKeyEventAction.Up,
         keyCode: AndroidKeyCode.AndroidAppSwitch,
@@ -296,128 +234,166 @@ function handleAppSwitchPointerUp(e) {
         metaState: 0,
     });
 }
+
+type ToolbarButton = {
+    icon: string;
+    label: string;
+    onClick: () => void;
+    size?: string;
+    isActive?: boolean;
+};
+
+const buttons = computed((): ToolbarButton[] => [
+    { icon: 'mdi-camera-outline', label: '截图', onClick: takeScreenshot },
+    {
+        icon: isRecording.value ? 'mdi-stop-circle' : 'mdi-radiobox-marked',
+        label: isRecording.value ? `录制中 ${recordingTime.value}` : '录制',
+        onClick: recording,
+        isActive: isRecording.value,
+    },
+    {
+        icon: isFullscreen.value ? 'mdi-fullscreen-exit' : 'mdi-fullscreen',
+        label: '全屏',
+        onClick: toggleFullScreen,
+    },
+    {
+        icon: isScreenOn.value ? 'mdi-eye-outline' : 'mdi-eye-off-outline',
+        label: '隐私模式',
+        onClick: toggleScreen,
+    },
+    { icon: 'mdi-screen-rotation', label: '旋转', size: '16', onClick: rotateDevice },
+    { icon: 'mdi-bell-outline', label: '通知栏', onClick: notificationPanel },
+    { icon: 'mdi-volume-plus', label: '音量 + ', onClick: volumeUp },
+    { icon: 'mdi-volume-minus', label: '音量 -', onClick: volumeDown },
+    {
+        icon: 'mdi-power-standby',
+        label: '电源',
+        onClick: () => client.device?.power?.powerButton(),
+    },
+]);
 </script>
 
 <template>
-    <div>
-        <div>
-            <slot />
-        </div>
+    <div class="nav-root">
+        <slot />
 
-        <v-container fluid>
-            <div class="d-flex align-center justify-center">
-                <v-card class="control-panel px-2 py-2" elevation="3" rounded="pill">
-                    <div class="d-flex align-center" tabindex="1" :class="className">
-                        <v-btn
-                            v-for="(button, index) in buttons"
-                            :key="index"
-                            :color="button.isActive ? 'error' : undefined"
-                            icon
-                            variant="text"
-                            size="x-small"
-                            class="control-btn"
-                            density="compact"
-                            :aria-label="
-                                typeof button.label === 'function' ? button.label() : button.label
-                            "
-                            @click="button.onClick"
-                        >
-                            <v-tooltip
-                                :text="
-                                    typeof button.label === 'function'
-                                        ? button.label()
-                                        : button.label
-                                "
-                                location="top"
-                            >
-                                <template #activator="{ props }">
-                                    <v-icon
-                                        v-bind="props"
-                                        :icon="
-                                            typeof button.icon === 'function'
-                                                ? button.icon()
-                                                : button.icon
-                                        "
-                                        :color="button.isActive ? 'error' : 'black'"
-                                        :size="button.size || '20px'"
-                                    />
-                                </template>
-                            </v-tooltip>
-                        </v-btn>
-                        <v-divider :thickness="2" color="info" aria-orientation="horizontal" />
-                        <v-btn
-                            variant="text"
-                            size="small"
-                            class="control-btn mx-1"
-                            @mousedown="handleBackPointerDown"
-                            @mouseup="handleBackPointerUp"
-                        >
-                            <v-tooltip text="返回" location="top">
-                                <template #activator="{ props }">
-                                    <v-icon v-bind="props" size="20px">mdi-arrow-left</v-icon>
-                                </template>
-                            </v-tooltip>
-                        </v-btn>
+        <div class="toolbar-wrap">
+            <div class="toolbar" tabindex="1" :class="className">
+                <button
+                    v-for="(button, index) in buttons"
+                    :key="index"
+                    class="tb-btn"
+                    :class="{ 'tb-btn--active': button.isActive }"
+                    :title="button.label"
+                    @click="button.onClick"
+                >
+                    <v-icon
+                        :icon="button.icon"
+                        :color="button.isActive ? '#ef4444' : undefined"
+                        :size="button.size || '18'"
+                    />
+                </button>
 
-                        <v-btn
-                            variant="text"
-                            size="20"
-                            class="control-btn mx-1"
-                            @mousedown="handleHomePointerDown"
-                            @mouseup="handleHomePointerUp"
-                        >
-                            <v-tooltip text="桌面" location="top">
-                                <template #activator="{ props }">
-                                    <v-icon v-bind="props">mdi-circle-outline</v-icon>
-                                </template>
-                            </v-tooltip>
-                        </v-btn>
-                        <v-btn
-                            variant="text"
-                            size="small"
-                            class="control-btn mx-1"
-                            @mousedown="handleAppSwitchPointerDown"
-                            @mouseup="handleAppSwitchPointerUp"
-                        >
-                            <v-tooltip text="菜单" location="top">
-                                <template #activator="{ props }">
-                                    <v-icon v-bind="props">mdi-square-outline</v-icon>
-                                </template>
-                            </v-tooltip>
-                        </v-btn>
-                    </div>
-                </v-card>
+                <span class="tb-sep" />
+
+                <button
+                    class="tb-btn"
+                    title="返回"
+                    @mousedown="handleBackPointerDown"
+                    @mouseup="handleBackPointerUp"
+                >
+                    <v-icon size="18">mdi-arrow-left</v-icon>
+                </button>
+
+                <button
+                    class="tb-btn"
+                    title="桌面"
+                    @mousedown="handleHomePointerDown"
+                    @mouseup="handleHomePointerUp"
+                >
+                    <v-icon size="18">mdi-circle-outline</v-icon>
+                </button>
+
+                <button
+                    class="tb-btn"
+                    title="菜单"
+                    @mousedown="handleAppSwitchPointerDown"
+                    @mouseup="handleAppSwitchPointerUp"
+                >
+                    <v-icon size="18">mdi-square-outline</v-icon>
+                </button>
             </div>
-        </v-container>
+        </div>
     </div>
 </template>
 
 <style scoped>
-.control-panel {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+.nav-root {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
 }
 
-.control-btn {
-    width:35px !important;
-    min-width: 35px !important;
-    height: 35px !important;
-    margin: 0 2px !important;
-    padding: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
+.toolbar-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-.control-btn:hover {
-    background-color: rgba(0, 0, 0, 0.04) !important;
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px;
+    background: rgb(var(--v-theme-surface));
+    border: 1px solid var(--border);
 }
 
-.control-btn :deep(.v-icon) {
-    margin: 0 !important;
-    padding: 0 !important;
+.tb-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: rgba(24, 24, 27, 0.7);
+    transition: background 0.15s ease, color 0.15s ease;
+    outline: none;
+    padding: 0;
 }
 
-.control-btn::before {
-    display: none !important;
+.tb-btn:hover {
+    background: rgba(24, 24, 27, 0.06);
+}
+
+.tb-btn:active {
+    background: rgba(24, 24, 27, 0.1);
+}
+
+.tb-btn--active {
+    background: rgba(239, 68, 68, 0.08);
+}
+
+.tb-sep {
+    width: 1px;
+    height: 20px;
+    margin: 0 4px;
+    background: var(--border);
+}
+
+.flex-column {
+    flex-direction: column;
+}
+
+.flex-column .tb-sep {
+    width: 20px;
+    height: 1px;
+    margin: 4px 0;
+}
+
+.flex-row {
+    flex-direction: row;
 }
 </style>

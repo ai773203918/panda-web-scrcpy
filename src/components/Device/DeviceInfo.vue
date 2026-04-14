@@ -206,11 +206,6 @@ const openDisplaySettings = async () => {
     await executeShellCommand(device.value, 'am start -a android.settings.DISPLAY_SETTINGS');
 };
 
-const openSoundSettings = async () => {
-    if (!device.value) return;
-    await executeShellCommand(device.value, 'am start -a android.settings.SOUND_SETTINGS');
-};
-
 const openAppSettings = async () => {
     if (!device.value) return;
     await executeShellCommand(device.value, 'am start -a android.settings.APPLICATION_SETTINGS');
@@ -243,123 +238,60 @@ onMounted(async () => {
 
 <template>
     <div class="device-info">
-        <div class="info-container">
-            <v-fade-transition mode="out-in">
-                <div v-if="isLoading" :key="'loading'" class="info-grid">
-                    <div class="info-main">
-                        <v-skeleton-loader
-                            type="article, actions"
-                            class="skeleton-card"
-                        ></v-skeleton-loader>
-                    </div>
-                    <div class="info-side">
-                        <v-skeleton-loader
-                            type="card"
-                            class="skeleton-card"
-                        ></v-skeleton-loader>
-                        <v-skeleton-loader
-                            type="card"
-                            class="skeleton-card"
-                        ></v-skeleton-loader>
-                    </div>
-                </div>
-                <div v-else :key="'content'" class="info-grid">
-                    <div class="info-main">
-                        <div class="basic-info-container">
-                            <DeviceBasicInfo :deviceInfo="deviceInfo" />
-                            <v-btn
-                                class="refresh-btn"
-                                icon="mdi-refresh"
-                                variant="text"
-                                :loading="isLoading"
-                                @click="refreshDeviceInfo"
-                                title="刷新设备信息"
-                            ></v-btn>
-                        </div>
-                        <div class="device-controls">
-                            <v-btn-group variant="outlined" class="control-group">
-                                <v-btn 
-                                    prepend-icon="mdi-cog" 
-                                    @click="openSettings"
-                                    title="打开系统设置"
-                                >
-                                    设置
-                                </v-btn>
-                                <v-btn 
-                                    prepend-icon="mdi-bug" 
-                                    @click="openDeveloperOptions"
-                                    title="打开开发者选项"
-                                >
-                                    开发者
-                                </v-btn>
-                                <v-btn 
-                                    prepend-icon="mdi-web" 
-                                    @click="openBrowser"
-                                    title="打开浏览器"
-                                >
-                                    浏览器
-                                </v-btn>
-                                <v-btn 
-                                    prepend-icon="mdi-wifi" 
-                                    @click="openWifiSettings"
-                                    title="打开WiFi设置"
-                                >
-                                    WiFi
-                                </v-btn>
-                            </v-btn-group>
-
-                            <v-btn-group variant="outlined" class="control-group">
-                                <v-btn 
-                                    prepend-icon="mdi-cellphone-screenshot" 
-                                    @click="openDisplaySettings"
-                                    title="打开显示设置"
-                                >
-                                    显示
-                                </v-btn>
-                                <v-btn 
-                                    prepend-icon="mdi-apps" 
-                                    @click="openAppSettings"
-                                    title="打开应用设置"
-                                >
-                                    应用
-                                </v-btn>
-                                <v-btn 
-                                    prepend-icon="mdi-information" 
-                                    @click="openAboutPhone"
-                                    title="关于手机"
-                                >
-                                    关于
-                                </v-btn>
-                            </v-btn-group>
-                        </div>
-                    </div>
-                    <div class="info-side">
-                        <BatteryInfo 
-                            :batteryPercentage="deviceInfo.batteryPercentage" 
-                            :voltage="deviceInfo.voltage" 
-                            :temperature="deviceInfo.temperature" 
-                            :batteryHealth="deviceInfo.batteryHealth"
-                            :batteryChargeCounter="deviceInfo.batteryChargeCounter"
-                            :batteryCurrent="deviceInfo.batteryCurrent"
-                        />
-                        <StorageInfo :deviceInfo="deviceInfo" />
-                    </div>
-                </div>
-            </v-fade-transition>
+        <div v-if="isLoading" class="info-grid">
+            <v-skeleton-loader type="article, actions" class="skeleton-card" />
+            <div class="info-side">
+                <v-skeleton-loader type="card" class="skeleton-card" />
+                <v-skeleton-loader type="card" class="skeleton-card" />
+            </div>
+        </div>
+        <div v-else class="info-grid">
+            <div class="basic-info-container">
+                <DeviceBasicInfo :deviceInfo="deviceInfo" />
+                <v-btn
+                    class="refresh-btn"
+                    icon="mdi-refresh"
+                    variant="text"
+                    size="small"
+                    :loading="isLoading"
+                    @click="refreshDeviceInfo"
+                    title="刷新设备信息"
+                />
+            </div>
+            <div class="info-side">
+                <BatteryInfo 
+                    :batteryPercentage="deviceInfo.batteryPercentage" 
+                    :voltage="deviceInfo.voltage" 
+                    :temperature="deviceInfo.temperature" 
+                    :batteryHealth="deviceInfo.batteryHealth"
+                    :batteryChargeCounter="deviceInfo.batteryChargeCounter"
+                    :batteryCurrent="deviceInfo.batteryCurrent"
+                />
+                <StorageInfo :deviceInfo="deviceInfo" />
+            </div>
+            <div class="device-controls">
+                <v-btn-group variant="outlined" class="control-group">
+                    <v-btn size="small" prepend-icon="mdi-cog" @click="openSettings" title="打开系统设置">设置</v-btn>
+                    <v-btn size="small" prepend-icon="mdi-bug" @click="openDeveloperOptions" title="打开开发者选项">开发者</v-btn>
+                    <v-btn size="small" prepend-icon="mdi-web" @click="openBrowser" title="打开浏览器">浏览器</v-btn>
+                    <v-btn size="small" prepend-icon="mdi-wifi" @click="openWifiSettings" title="打开WiFi设置">WiFi</v-btn>
+                </v-btn-group>
+                <v-btn-group variant="outlined" class="control-group">
+                    <v-btn size="small" prepend-icon="mdi-cellphone-screenshot" @click="openDisplaySettings" title="打开显示设置">显示</v-btn>
+                    <v-btn size="small" prepend-icon="mdi-apps" @click="openAppSettings" title="打开应用设置">应用</v-btn>
+                    <v-btn size="small" prepend-icon="mdi-information" @click="openAboutPhone" title="关于手机">关于</v-btn>
+                </v-btn-group>
+            </div>
         </div>
     </div>
 </template>
 
 <style scoped>
 .device-info {
-    padding: 16px;
-    height: calc(100vh - 160px);
+    box-sizing: border-box;
+    height: 100%;
+    padding: 12px;
     overflow-y: auto;
-}
-
-.info-container {
-    position: relative;
-    min-height: 400px;
 }
 
 .basic-info-container {
@@ -368,31 +300,30 @@ onMounted(async () => {
 
 .refresh-btn {
     position: absolute;
-    top: 8px;
-    right: 8px;
+    top: 10px;
+    right: 12px;
+    z-index: 1;
 }
 
 .info-grid {
-    padding-top: 48px;
     display: grid;
-    grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
-    gap: 24px;
+    grid-template-columns: 1fr;
+    gap: 16px;
 }
 
 .info-main {
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 16px;
 }
 
 .device-controls {
     display: flex;
     flex-direction: column;
-    gap: 16px;
-    padding: 16px;
-    background: white;
-    border-radius: 8px;
-    border: 1px solid rgba(0, 0, 0, 0.12);
+    gap: 10px;
+    padding: 12px;
+    background: rgb(var(--v-theme-surface));
+    border: 1px solid var(--border);
 }
 
 .control-group {
@@ -411,40 +342,22 @@ onMounted(async () => {
 
 .info-side {
     display: grid;
-    grid-template-columns: 1fr;
-    gap: 24px;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
 }
 
 .info-side :deep(.v-card) {
     height: 100%;
-    min-height: 200px;
-}
-
-@media (max-width: 1200px) {
-    .info-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .info-side {
-        grid-template-columns: repeat(2, 1fr);
-    }
+    min-height: 160px;
 }
 
 @media (max-width: 768px) {
-    .device-controls {
-        padding: 12px;
-    }
-
     .control-group {
         grid-template-columns: 1fr 1fr;
     }
 
     .info-side {
         grid-template-columns: 1fr;
-    }
-    
-    .info-side :deep(.v-card) {
-        min-height: 180px;
     }
 }
 
@@ -454,11 +367,10 @@ onMounted(async () => {
 }
 
 .skeleton-card {
-    background: white;
-    border-radius: 8px;
-    border: 1px solid rgba(0, 0, 0, 0.12);
+    background: rgb(var(--v-theme-surface));
+    border: 1px solid var(--border);
     height: 100%;
-    min-height: 200px;
+    min-height: 120px;
 }
 
 /* 适配暗色主题 */
