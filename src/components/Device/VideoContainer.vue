@@ -28,7 +28,9 @@ const MOUSE_EVENT_BUTTON_TO_ANDROID_BUTTON = [
     AndroidMotionEventButton.Forward,
 ];
 
-const activePointers = new Set<number>();
+// 【ZWZW修复】使用 ScrcpyPointerId 作为 key，而不是原始 pointerId
+// 因为手机上每次触摸的 pointerId 会变化，但我们都映射到 ScrcpyPointerId.Finger
+const activePointers = new Set<bigint>();
 
 /** 键盘/滚轮等需要焦点，避免误触 */
 const isReady = () => (
@@ -76,26 +78,101 @@ const handleWheel = (e: WheelEvent) => {
     });
 };
 
-const injectTouch = (action: AndroidMotionEventAction, e: PointerEvent) => {
-    if (!touchPipelineReady()) return;
+// 【ZWZW新增】日志收集数组，用于远程调试
+const debugLogs_ZWZW: Array<{time: string; msg: string; data?: unknown}> = [];
+const MAX_LOGS_ZWZW = 100;
 
-    const { pointerType } = e;
-    const pointerId: bigint =
-        pointerType === 'mouse' ? ScrcpyPointerId.Finger : BigInt(e.pointerId);
+// 【ZWZW新增】添加调试日志
+function addDebugLog_ZWZW(msg: string, data?: unknown): void {
+    const log = {
+        time: new Date().toISOString(),
+        msg,
+        data,
+    };
+    debugLogs_ZWZW.push(log);
+    if (debugLogs_ZWZW.length > MAX_LOGS_ZWZW) {
+        debugLogs_ZWZW.shift();
+    }
+    // 同时输出到控制台
+    console.log(`[VideoContainer_ZWZW] ${msg}`, data ?? '');
+}
+
+// 【ZWZW新增】获取调试日志（用于导出）
+function getDebugLogs_ZWZW(): string {
+    return JSON.stringify(debugLogs_ZWZW, null, 2);
+}
+
+// 暴露到全局，方便在控制台调用
+if (typeof window !== 'undefined') {
+    (window as unknown as Record<string, unknown>).getVideoContainerLogs_ZWZW = getDebugLogs_ZWZW;
+}
+
+// 【ZWZW修复】获取标准化的 pointerId，用于状态管理和发送给 Scrcpy
+function getStandardPointerId(e: PointerEvent): bigint {
+    const { pointerType, pointerId: rawPointerId } = e;
+    
+    // 手机上 touch 事件统一使用 ScrcpyPointerId.Finger
+    // 鼠标使用 Mouse 指针 ID
+    if (pointerType === 'mouse') {
+        return ScrcpyPointerId.Mouse;
+    }
+    
+    // 触摸设备统一使用 Finger
+    return ScrcpyPointerId.Finger;
+}
+
+const injectTouch = (action: AndroidMotionEventAction, e: PointerEvent, forcedPointerId?: bigint) => {
+    if (!touchPipelineReady()) {
+        addDebugLog_ZWZW('touchPipelineReady false', {
+            hasScrcpy: !!state.scrcpy,
+            hasCanvas: !!state.canvas,
+            isCanvasReady: isCanvasReady.value,
+            isFullyRendered: isFullyRendered.value,
+        });
+        return;
+    }
+
+    const { pointerType, pointerId: rawPointerId } = e;
+    
+    // 使用传入的 pointerId 或重新计算
+    const pointerId = forcedPointerId ?? getStandardPointerId(e);
+    
+    addDebugLog_ZWZW('injectTouch called', {
+        action,
+        pointerType,
+        rawPointerId,
+        standardizedPointerId: pointerId.toString(),
+        button: e.button,
+        buttons: e.buttons,
+        clientX: e.clientX,
+        clientY: e.clientY,
+    });
 
     const { x, y } = state.clientPositionToDevicePosition(e.clientX, e.clientY);
 
-    state.scrcpy?.controller?.injectTouch({
+    addDebugLog_ZWZW('sending touch command', {
         action,
-        pointerId,
-        videoWidth: state.width!,
-        videoHeight: state.height!,
+        pointerId: pointerId.toString(),
         pointerX: x,
         pointerY: y,
-        pressure: e.pressure,
-        actionButton: MOUSE_EVENT_BUTTON_TO_ANDROID_BUTTON[e.button],
-        buttons: e.buttons,
     });
+
+    try {
+        state.scrcpy?.controller?.injectTouch({
+            action,
+            pointerId,
+            videoWidth: state.width!,
+            videoHeight: state.height!,
+            pointerX: x,
+            pointerY: y,
+            pressure: e.pressure,
+            actionButton: MOUSE_EVENT_BUTTON_TO_ANDROID_BUTTON[e.button] ?? AndroidMotionEventButton.Primary,
+            buttons: e.buttons,
+        });
+        addDebugLog_ZWZW('injectTouch success');
+    } catch (err) {
+        addDebugLog_ZWZW('injectTouch failed', { error: String(err) });
+    }
 };
 
 const handlePointerDown = (e: PointerEvent) => {
@@ -106,13 +183,25 @@ const handlePointerDown = (e: PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
+    // 【ZWZW修复】使用标准化的 pointerId 进行状态管理
+    const pointerId = getStandardPointerId(e);
+    
+    addDebugLog_ZWZW('handlePointerDown', {
+        rawPointerId: e.pointerId,
+        standardizedPointerId: pointerId.toString(),
+        activePointersSize: activePointers.size,
+    });
+
     (e.currentTarget as HTMLDivElement)?.setPointerCapture(e.pointerId);
-    activePointers.add(e.pointerId);
-    injectTouch(AndroidMotionEventAction.Down, e);
+    activePointers.add(pointerId);
+    injectTouch(AndroidMotionEventAction.Down, e, pointerId);
 };
 
 const handlePointerMove = (e: PointerEvent) => {
-    const isDragging = activePointers.has(e.pointerId);
+    // 【ZWZW修复】使用标准化的 pointerId 检查拖拽状态
+    const pointerId = getStandardPointerId(e);
+    const isDragging = activePointers.has(pointerId);
+    
     if (isDragging) {
         if (!touchPipelineReady()) return;
     } else {
@@ -126,19 +215,29 @@ const handlePointerMove = (e: PointerEvent) => {
         ? AndroidMotionEventAction.Move
         : AndroidMotionEventAction.HoverMove;
 
-    injectTouch(action, e);
+    injectTouch(action, e, pointerId);
 };
 
 const handlePointerUp = (e: PointerEvent) => {
     if (!touchPipelineReady()) return;
 
-    const wasDragging = activePointers.has(e.pointerId);
+    // 【ZWZW修复】使用标准化的 pointerId
+    const pointerId = getStandardPointerId(e);
+    const wasDragging = activePointers.has(pointerId);
+    
+    addDebugLog_ZWZW('handlePointerUp', {
+        rawPointerId: e.pointerId,
+        standardizedPointerId: pointerId.toString(),
+        wasDragging,
+        activePointersSize: activePointers.size,
+    });
+    
     if (!wasDragging && !isPointInCanvas(e.clientX, e.clientY)) return;
 
     e.preventDefault();
     e.stopPropagation();
 
-    activePointers.delete(e.pointerId);
+    activePointers.delete(pointerId);
 
     try {
         (e.currentTarget as HTMLDivElement)?.releasePointerCapture(e.pointerId);
@@ -146,31 +245,37 @@ const handlePointerUp = (e: PointerEvent) => {
         // pointer capture may already be released
     }
 
-    injectTouch(AndroidMotionEventAction.Up, e);
+    injectTouch(AndroidMotionEventAction.Up, e, pointerId);
 };
 
 const handlePointerLeave = (e: PointerEvent) => {
     if (!touchPipelineReady()) return;
-    if (activePointers.has(e.pointerId)) return;
+    // 【ZWZW修复】使用标准化的 pointerId
+    const pointerId = getStandardPointerId(e);
+    if (activePointers.has(pointerId)) return;
 
-    injectTouch(AndroidMotionEventAction.HoverExit, e);
+    injectTouch(AndroidMotionEventAction.HoverExit, e, pointerId);
 };
 
 const handlePointerCancel = (e: PointerEvent) => {
     if (!touchPipelineReady()) return;
 
-    if (activePointers.has(e.pointerId)) {
-        activePointers.delete(e.pointerId);
-        injectTouch(AndroidMotionEventAction.Up, e);
+    // 【ZWZW修复】使用标准化的 pointerId
+    const pointerId = getStandardPointerId(e);
+    if (activePointers.has(pointerId)) {
+        activePointers.delete(pointerId);
+        injectTouch(AndroidMotionEventAction.Up, e, pointerId);
     }
 };
 
 /** 浏览器意外释放 capture 时补发 Up，防止设备端一直按住 */
 const handleLostPointerCapture = (e: PointerEvent) => {
     if (!touchPipelineReady()) return;
-    if (!activePointers.has(e.pointerId)) return;
-    activePointers.delete(e.pointerId);
-    injectTouch(AndroidMotionEventAction.Up, e);
+    // 【ZWZW修复】使用标准化的 pointerId
+    const pointerId = getStandardPointerId(e);
+    if (!activePointers.has(pointerId)) return;
+    activePointers.delete(pointerId);
+    injectTouch(AndroidMotionEventAction.Up, e, pointerId);
 };
 
 const handleContextMenu = (e: MouseEvent) => {
